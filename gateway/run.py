@@ -25316,7 +25316,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         "metadata": thread_meta,
                     }
                     send_result = await send_voice_call(**send_kwargs)
-                    delivered = bool(getattr(send_result, "success", False)) or delivered
+                    send_ok = bool(getattr(send_result, "success", False))
+                    logger.info(
+                        "Auto voice reply delivery: platform=%s success=%s message_id_present=%s error=%s",
+                        event.source.platform.value,
+                        send_ok,
+                        bool(getattr(send_result, "message_id", None)),
+                        str(getattr(send_result, "error", None) or "")[:240],
+                    )
+                    delivered = send_ok or delivered
             if delivered and self._voice_mode.get(self._voice_key_for_source(event.source)) == "tts_only":
                 # The adapter post-handler still owns normal text/media delivery.
                 # Mark only successful native TTS delivery so it can suppress the
