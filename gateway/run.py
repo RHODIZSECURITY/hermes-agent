@@ -20537,6 +20537,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if response is None:
                 return ""
             if isinstance(response, str):
+                # A post-auth product core can own the turn without entering
+                # _handle_message_with_agent().  Preserve the gateway-level
+                # voice contract on that path too: /voice tts-only must still
+                # synthesize native audio and, on successful delivery, mark the
+                # event so the adapter suppresses the duplicate text bubble.
+                # _send_voice_reply is fail-open for delivery: when TTS fails,
+                # the marker is not set and the canonical text response remains
+                # the deterministic fallback.
+                try:
+                    should_voice = self._should_send_voice_reply(
+                        event, response, [], already_sent=False
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "gateway_turn_handler voice-output gate failed: %s", exc
+                    )
+                    should_voice = False
+                if should_voice:
+                    await self._send_voice_reply(event, response)
                 return response
             logger.warning("gateway_turn_handler returned non-string response")
         return None
