@@ -146,3 +146,15 @@ class TestEssentialOnlySync:
         assert result["copied"] == ["hermes-agent"]
         assert (home / "skills" / "autonomous-ai-agents" / "hermes-agent" / "SKILL.md").exists()
         assert not (home / "skills" / "media").exists()
+
+
+def test_internal_framework_guidance_preserves_rhodiz_public_identity():
+    from agent.prompt_builder import (
+        HERMES_AGENT_HELP_GUIDANCE,
+        HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS,
+    )
+    for guidance in (HERMES_AGENT_HELP_GUIDANCE, HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS):
+        assert "RHODIZ IA uses Hermes Agent" in guidance
+        assert "never identify yourself as Hermes" in guidance
+        assert "unless the user explicitly asks" in guidance
+        assert "You run on Hermes Agent" not in guidance
