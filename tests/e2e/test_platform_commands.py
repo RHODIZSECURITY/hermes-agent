@@ -171,6 +171,30 @@ class TestSlashCommands:
         runner._handle_message_with_agent.assert_not_awaited()
 
 
+    @pytest.mark.asyncio
+    async def test_rhodiz_voz_alias_reaches_tts_only_voice_mode(
+        self, adapter, runner, platform
+    ):
+        """RHODIZ /voz must resolve to Hermes /voice tts-only end to end."""
+        runner.config.quick_commands = {
+            "voz": {"type": "alias", "target": "/voice tts-only"}
+        }
+
+        async def _handle_voice(event):
+            assert event.get_command_args() == "tts-only"
+            return "voice-only output enabled"
+
+        runner._handle_voice_command = AsyncMock(side_effect=_handle_voice)
+
+        send = await send_and_capture(adapter, "/voz", platform)
+
+        send.assert_called_once()
+        response_text = send.call_args[1].get("content") or send.call_args[0][1]
+        assert response_text == "voice-only output enabled"
+        runner._handle_voice_command.assert_awaited_once()
+        runner._handle_message_with_agent.assert_not_awaited()
+
+
 
 class TestSessionLifecycle:
     """Verify session state changes across command sequences."""
