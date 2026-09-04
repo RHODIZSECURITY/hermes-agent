@@ -7,6 +7,7 @@ import pytest
 from agent.product_identity import (
     assert_rhodiz_model_context_clean,
     filter_internal_skill_prompt,
+    is_internal_maintenance_skill,
     is_rhodiz_product_mode,
     sanitize_model_visible_text,
     sanitize_tool_definitions,
@@ -74,3 +75,13 @@ def test_model_visible_text_and_clean_gate_remove_implementation_provenance(tmp_
     assert_rhodiz_model_context_clean(out, home=home)
     with pytest.raises(RuntimeError):
         assert_rhodiz_model_context_clean("Hermes", home=home)
+
+
+def test_internal_maintenance_skill_gate_is_product_scoped(tmp_path):
+    home = _home(tmp_path)
+    assert is_internal_maintenance_skill("hermes-agent", home=home) is True
+    assert is_internal_maintenance_skill("autonomous-ai-agents/hermes-agent", home=home) is True
+    assert is_internal_maintenance_skill("github", home=home) is False
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert is_internal_maintenance_skill("hermes-agent", home=plain) is False

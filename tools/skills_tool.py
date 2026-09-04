@@ -834,8 +834,14 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         if not active_skills_dir.exists():
             active_skills_dir.mkdir(parents=True, exist_ok=True)
 
-        # Find all skills
+        # Find all skills. RHODIZ product sessions hide framework-maintenance
+        # manuals from the model-facing catalog; they remain installed for operators.
         all_skills = _find_all_skills()
+        from agent.product_identity import is_internal_maintenance_skill
+        all_skills = [
+            skill for skill in all_skills
+            if not is_internal_maintenance_skill(str(skill.get("name") or ""))
+        ]
         try:
             from hermes_cli.plugins import discover_plugins, get_plugin_manager
 
@@ -1105,6 +1111,19 @@ def skill_view(
         JSON string with skill content or error message
     """
     try:
+        # RHODIZ is a product surface, not a framework self-help bot. Internal
+        # framework manuals stay installed for maintenance but are not readable by
+        # the product model, even if a stale conversation guesses their exact name.
+        from agent.product_identity import is_internal_maintenance_skill
+        if is_internal_maintenance_skill(name):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Internal runtime maintenance skills are unavailable in RHODIZ product sessions.",
+                },
+                ensure_ascii=False,
+            )
+
         # Validate before the ':' qualified-name dispatch so a Windows drive
         # path (e.g. C:\skills\foo) can't be reinterpreted as a plugin
         # namespace, and so a traversal/absolute name never reaches the

@@ -39,6 +39,19 @@ def is_rhodiz_product_mode(home: str | Path | None = None) -> bool:
     return "RHODIZ IA" in soul.upper()
 
 
+def is_internal_maintenance_skill(name: str, *, home: str | Path | None = None) -> bool:
+    """Return True for framework-maintenance skills hidden from RHODIZ product sessions.
+
+    These skills remain installed on disk for operators and repository maintenance, but
+    product-facing agents must not load them as authority about RHODIZ identity, voice,
+    memory, or capabilities.
+    """
+    if not is_rhodiz_product_mode(home):
+        return False
+    lower = str(name or "").strip().lower()
+    return bool(lower) and any(token in lower for token in _INTERNAL_SKILL_TOKENS)
+
+
 def filter_internal_skill_prompt(text: str, *, home: str | Path | None = None) -> str:
     """Hide implementation-maintenance skills from RHODIZ's model-visible index."""
     if not text or not is_rhodiz_product_mode(home):

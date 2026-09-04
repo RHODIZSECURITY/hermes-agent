@@ -257,6 +257,28 @@ class TestFindAllSkills:
 # ---------------------------------------------------------------------------
 
 
+class TestRhodizProductSkillBoundary:
+    def test_internal_framework_skill_is_hidden_and_unreadable(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        skills_dir = home / "skills"
+        skills_dir.mkdir(parents=True)
+        (home / ".rhodiz-product").write_text("RHODIZ IA\n", encoding="utf-8")
+        _make_skill(skills_dir, "hermes-agent", category="internal")
+        _make_skill(skills_dir, "github", category="devops")
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+        with patch("tools.skills_tool.SKILLS_DIR", skills_dir):
+            listed = json.loads(skills_list())
+            blocked = json.loads(skill_view("hermes-agent"))
+
+        names = {item["name"] for item in listed["skills"]}
+        assert "github" in names
+        assert "hermes-agent" not in names
+        assert blocked["success"] is False
+        assert "RHODIZ product sessions" in blocked["error"]
+        assert "Hermes" not in blocked["error"]
+
+
 class TestSkillsList:
     def test_empty_creates_directory(self, tmp_path):
         skills_dir = tmp_path / "skills"
