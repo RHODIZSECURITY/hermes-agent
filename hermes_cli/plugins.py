@@ -557,9 +557,12 @@ def _classify_entrypoint_value_kind(value: str) -> str:
 # hooks. They become high-trust prompt bytes and are charged on every turn.
 SYSTEM_PROMPT_SECTION_POSITIONS = frozenset({"after_memory"})
 DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS = 4_000
-MAX_SYSTEM_PROMPT_SECTION_CHARS = 4_000
+# RHODIZ's canonical editable personality is bounded at 8k. Keep the generic
+# default at 4k, but permit an explicitly-budgeted high-trust section to carry
+# that canonical persona without truncation.
+MAX_SYSTEM_PROMPT_SECTION_CHARS = 8_000
 MAX_SYSTEM_PROMPT_SECTIONS = 32
-MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS = 8_000
+MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS = 16_000
 _SYSTEM_PROMPT_SECTION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SYSTEM_PROMPT_SECTION_HEADING_PREFIX = "## Plugin Context: "
 PLUGIN_SECTIONS_START = "<!-- hermes-plugin-sections:start -->"

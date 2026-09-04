@@ -88,3 +88,16 @@ def test_render_fails_open_for_callback_failure_wrong_type_and_aggregate_budget(
     assert "plugin exploded" in caplog.text
     assert "returned dict, not str" in caplog.text
     assert "aggregate" in caplog.text
+
+
+def test_explicit_eight_kib_section_is_supported_for_bounded_product_persona():
+    manager = PluginManager()
+    ctx = _context(manager, "rhodiz-identity")
+    content = "R" * 8000
+    ctx.register_system_prompt_section(
+        "rhodiz.personality", content, max_chars=8000
+    )
+    rendered = manager.render_system_prompt_sections({"session_id": "rhodiz"})
+    assert [(item.id, item.content) for item in rendered] == [
+        ("rhodiz.personality", content)
+    ]
