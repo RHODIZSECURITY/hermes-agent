@@ -60,13 +60,16 @@ class TestEnsureHermesHome:
             ensure_hermes_home()
             soul_path = tmp_path / "SOUL.md"
             assert soul_path.exists()
-            assert soul_path.read_text(encoding="utf-8").strip() != ""
+            content = soul_path.read_text(encoding="utf-8")
+            assert content.startswith("You are RHODIZ IA")
+            assert "created by RHODIZ IT LLC" in content
+            assert not content.startswith("You are Hermes Agent")
 
 
     def test_upgrades_legacy_template_soul_md(self, tmp_path):
-        # Older installers seeded a comment-only scaffold that shadowed the
-        # runtime default. A SOUL.md still matching that scaffold carries no
-        # user persona and should be upgraded in place to DEFAULT_SOUL_MD.
+        # Older installers seeded known default templates. A SOUL.md still
+        # matching one of those exact auto-generated strings carries no user
+        # persona and should be upgraded in place to the RHODIZ default.
         from hermes_cli.default_soul import DEFAULT_SOUL_MD, _LEGACY_TEMPLATE_SOULS
 
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):

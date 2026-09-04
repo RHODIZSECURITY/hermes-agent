@@ -60,6 +60,13 @@ def _drain_truncation_warnings():
 # =========================================================================
 
 
+def test_default_identity_is_rhodiz_even_without_soul():
+    assert DEFAULT_AGENT_IDENTITY.startswith("You are RHODIZ IA")
+    assert "created by RHODIZ IT LLC" in DEFAULT_AGENT_IDENTITY
+    assert "Never identify yourself as Hermes" in DEFAULT_AGENT_IDENTITY
+    assert not DEFAULT_AGENT_IDENTITY.startswith("You are Hermes Agent")
+
+
 class TestGuidanceConstants:
     def test_memory_guidance_keeps_form_rule_and_routing(self):
         """Dieted (#95681): WHAT belongs in memory is the memory tool

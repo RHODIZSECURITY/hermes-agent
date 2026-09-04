@@ -118,6 +118,11 @@ class TestFormatMessage:
 class TestMessageLimits:
     """WhatsApp message length limits."""
 
+    def test_default_self_chat_prefix_uses_rhodiz_public_identity(self):
+        adapter = _make_adapter()
+        assert "RHODIZ IA" in adapter.DEFAULT_REPLY_PREFIX
+        assert "Hermes Agent" not in adapter.DEFAULT_REPLY_PREFIX
+
 
     def test_chunk_limit_reserves_default_self_chat_prefix(self, monkeypatch):
         adapter = _make_adapter()
