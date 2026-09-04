@@ -20434,6 +20434,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         try:
             try:
+                _external_turn = await self._run_gateway_turn_handler(
+                    event=event, source=source, session_key=_quick_key
+                )
+                if _external_turn is not None:
+                    return _external_turn
                 _agent_result = await self._handle_message_with_agent(
                     event, source, _quick_key, _run_generation
                 )
@@ -20490,6 +20495,51 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # (routing key, run generation) so this unwind can only ever free
             # the lease its own turn acquired, never a newer turn's.
             self._release_turn_lease(_quick_key, _run_generation)
+
+    async def _run_gateway_turn_handler(
+        self, *, event: "MessageEvent", source, session_key: str
+    ) -> Optional[str]:
+        """Let a post-auth plugin own a normal gateway turn.
+
+        This is deliberately later than ``pre_gateway_dispatch``: pairing/auth,
+        slash-command handling, drain gating and the per-session active slot have
+        already run. A product bridge therefore cannot turn an unauthorized
+        transport event into an agent request or introduce concurrent turns.
+        Blocking plugin I/O is dispatched off the asyncio loop.
+        """
+        if bool(getattr(event, "internal", False)):
+            return None
+        try:
+            from hermes_cli.lifecycle import invoke_hook as _invoke_hook
+            results = await asyncio.to_thread(
+                _invoke_hook,
+                "gateway_turn_handler",
+                event=event,
+                source=source,
+                session_key=session_key,
+                gateway=self,
+                session_store=getattr(self, "session_store", None),
+            )
+        except Exception as exc:
+            logger.warning("gateway_turn_handler invocation failed: %s", exc)
+            return None
+
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            action = str(result.get("action") or "").strip().lower()
+            if action in {"", "allow", "pass"}:
+                continue
+            if action != "handled":
+                logger.warning("gateway_turn_handler ignored unknown action=%r", action)
+                continue
+            response = result.get("response")
+            if response is None:
+                return ""
+            if isinstance(response, str):
+                return response
+            logger.warning("gateway_turn_handler returned non-string response")
+        return None
 
     def _restore_moa_one_shot(self, event: "MessageEvent", quick_key: str) -> None:
         """Revert a ``/moa <prompt>`` one-shot model override after its turn.

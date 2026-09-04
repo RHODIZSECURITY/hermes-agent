@@ -233,6 +233,13 @@ VALID_HOOKS: Set[str] = {
     #   {"action": "allow"}  /  None             -> normal dispatch
     # Kwargs: event: MessageEvent, gateway: GatewayRunner, session_store.
     "pre_gateway_dispatch",
+    # Post-auth, post-command turn ownership hook. A product integration can
+    # resolve an ordinary user turn in its canonical core instead of starting
+    # Hermes' own AIAgent. Callbacks return either None/{"action": "allow"}
+    # or {"action": "handled", "response": <str>}. The gateway invokes this
+    # only after authorization and while the per-session active-turn slot is
+    # held, so a transport plugin cannot bypass pairing or race two turns.
+    "gateway_turn_handler",
     # Approval lifecycle hooks. Fired by tools/approval.py when a dangerous
     # command needs an approval decision -- fires for CLI-interactive prompts,
     # gateway/ACP approvals, and smart-mode auxiliary-LLM decisions.
