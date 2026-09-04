@@ -1310,7 +1310,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         **kwargs,
     ) -> SendResult:
         """Send an audio file as a WhatsApp voice message via bridge."""
-        return await self._send_media_to_bridge(chat_id, audio_path, "audio", caption)
+        return await self._send_media_to_bridge(chat_id, audio_path, "voice", caption)
 
     async def send_document(
         self,

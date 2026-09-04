@@ -43,3 +43,24 @@ async def test_send_location_posts_to_bridge_location_endpoint():
     }
 
 
+
+
+@pytest.mark.asyncio
+async def test_send_voice_marks_media_as_native_voice():
+    adapter = _make_adapter()
+    adapter._send_media_to_bridge = AsyncMock(
+        return_value=MagicMock(success=True, message_id="voice-msg")
+    )
+
+    result = await adapter.send_voice(
+        "15551234567",
+        "/tmp/rhodiz-reply.wav",
+    )
+
+    assert result.success
+    adapter._send_media_to_bridge.assert_awaited_once_with(
+        "15551234567",
+        "/tmp/rhodiz-reply.wav",
+        "voice",
+        None,
+    )
