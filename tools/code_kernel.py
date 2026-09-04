@@ -687,6 +687,8 @@ def _spawn(kernel: SessionKernel, *, task_id: str, child_python: str,
     tools_src = generate_hermes_tools_module(list(sandbox_tools))
     with open(os.path.join(kernel.tmpdir, "hermes_tools.py"), "w", encoding="utf-8") as f:
         f.write(tools_src)
+    with open(os.path.join(kernel.tmpdir, "rhodiz_tools.py"), "w", encoding="utf-8") as f:
+        f.write("from hermes_tools import *\n")
     runner_path = os.path.join(kernel.tmpdir, "hermes_kernel_runner.py")
     with open(runner_path, "w", encoding="utf-8") as f:
         f.write(KERNEL_RUNNER_SOURCE)

@@ -56,11 +56,17 @@ from agent.runtime_cwd import resolve_context_cwd
 from hermes_constants import get_default_hermes_root, get_hermes_home
 from pathlib import Path
 from utils import is_truthy_value
+from agent.product_identity import (
+    assert_rhodiz_model_context_clean,
+    filter_internal_skill_prompt,
+    is_rhodiz_product_mode,
+    sanitize_model_visible_text,
+)
 
 logger = logging.getLogger(__name__)
 _PLUGIN_SECTION_FRAME_RE = re.compile(
     r"^## Plugin Context: (?P<id>[a-z0-9][a-z0-9._-]{0,127})\n"
-    r"<!-- hermes-plugin-section-chars:(?P<chars>[0-9]{1,4}) -->\n\n",
+    r"<!-- (?:agent|hermes)-plugin-section-chars:(?P<chars>[0-9]{1,4}) -->\n\n",
     re.MULTILINE,
 )
 
@@ -230,19 +236,25 @@ def _restore_plugin_prompt_sections(prompt: str) -> tuple:
     """Recover frozen section bytes from the already-persisted full prompt."""
     from hermes_cli.plugins import (
         MAX_SYSTEM_PROMPT_SECTION_CHARS,
+        LEGACY_PLUGIN_SECTIONS_END,
+        LEGACY_PLUGIN_SECTIONS_START,
         PLUGIN_SECTIONS_END,
         PLUGIN_SECTIONS_START,
         RenderedPluginSystemPromptSection,
         format_system_prompt_sections,
     )
 
-    start = prompt.rfind(PLUGIN_SECTIONS_START)
+    candidates = [
+        (prompt.rfind(PLUGIN_SECTIONS_START), PLUGIN_SECTIONS_START, PLUGIN_SECTIONS_END, False),
+        (prompt.rfind(LEGACY_PLUGIN_SECTIONS_START), LEGACY_PLUGIN_SECTIONS_START, LEGACY_PLUGIN_SECTIONS_END, True),
+    ]
+    start, start_marker, end_marker, legacy = max(candidates, key=lambda item: item[0])
     if start < 0:
         return ()
-    end = prompt.find(PLUGIN_SECTIONS_END, start + len(PLUGIN_SECTIONS_START))
+    end = prompt.find(end_marker, start + len(start_marker))
     if end < 0:
         return ()
-    after_end = end + len(PLUGIN_SECTIONS_END)
+    after_end = end + len(end_marker)
     if not prompt[after_end:].startswith("\n\nConversation started:"):
         return ()
     framed = prompt[start:after_end]
@@ -266,7 +278,16 @@ def _restore_plugin_prompt_sections(prompt: str) -> tuple:
         )
     # User/project text may resemble a frame. Accept only the exact canonical
     # container emitted by core, never a partial or malformed lookalike.
-    if format_system_prompt_sections(restored) != framed:
+    canonical = format_system_prompt_sections(restored)
+    if legacy:
+        framed_for_compare = (
+            framed.replace(LEGACY_PLUGIN_SECTIONS_START, PLUGIN_SECTIONS_START, 1)
+            .replace(LEGACY_PLUGIN_SECTIONS_END, PLUGIN_SECTIONS_END, 1)
+            .replace("hermes-plugin-section-chars", "agent-plugin-section-chars")
+        )
+    else:
+        framed_for_compare = framed
+    if canonical != framed_for_compare:
         return ()
     return tuple(restored)
 
@@ -454,6 +475,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # patch ``run_agent.get_toolset_for_tool`` and similar helpers, so
     # we resolve through ``_ra()`` to honor those patches.
     _r = _ra()
+    _product_home = _agent_home(agent)
+    _rhodiz_mode = is_rhodiz_product_mode(_product_home)
 
     # Resolve the model's context window once so context-file caps can scale
     # to it (dynamic cap — see prompt_builder._dynamic_context_file_max_chars).
@@ -646,13 +669,15 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         )
     else:
         skills_prompt = ""
+    if _rhodiz_mode and skills_prompt:
+        skills_prompt = filter_internal_skill_prompt(skills_prompt, home=_product_home)
 
     # Resolve the help-guidance variant now that the skills index exists:
     # the skill-pointer variant requires BOTH skill_view in the toolset AND
     # the hermes-agent skill actually present in the index (gating on the
     # rendered index line keeps this a pure string check — no second
     # filesystem scan, and it inherits the index cache's stability).
-    if _has_skill_view and "- hermes-agent:" in skills_prompt:
+    if (not _rhodiz_mode) and _has_skill_view and "- hermes-agent:" in skills_prompt:
         stable_parts[_help_guidance_slot] = HERMES_AGENT_HELP_GUIDANCE
 
     # Alibaba Coding Plan API always returns "glm-4.7" as model name regardless
@@ -796,14 +821,21 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     else:
         _home_str = _root_str = str(get_hermes_home())
     if active_profile == "default":
-        post_workspace_parts.append(
-            "Active Hermes profile: default. Other profiles (if any) live "
-            "under " + _root_str + "/profiles/<name>/. Each profile has its own "
-            "skills/, plugins/, cron/, and memories/ that affect a different "
-            "session than this one. Do not modify another profile's "
-            "skills/plugins/cron/memories unless the user explicitly directs "
-            "you to."
-        )
+        if _rhodiz_mode:
+            post_workspace_parts.append(
+                "Active RHODIZ profile: default. Other profiles are isolated execution contexts. "
+                "Do not modify another profile's skills, plugins, schedules, or memories unless "
+                "the user explicitly directs you to."
+            )
+        else:
+            post_workspace_parts.append(
+                "Active Hermes profile: default. Other profiles (if any) live "
+                "under " + _root_str + "/profiles/<name>/. Each profile has its own "
+                "skills/, plugins/, cron/, and memories/ that affect a different "
+                "session than this one. Do not modify another profile's "
+                "skills/plugins/cron/memories unless the user explicitly directs "
+                "you to."
+            )
     else:
         # A non-default name is only ever returned when the resolved home is
         # ALREADY <root>/profiles/<name> — that is exactly how both
@@ -814,15 +846,22 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         # profile mode is NOT get_hermes_home().
         profile_home = _home_str
         default_root = get_default_hermes_root()
-        post_workspace_parts.append(
-            f"Active Hermes profile: {active_profile}. This session reads "
-            f"and writes {profile_home}/. The default "
-            f"profile's data lives at {default_root}/skills/, {default_root}/plugins/, "
-            f"{default_root}/cron/, {default_root}/memories/ — those belong to a "
-            f"different session run from a different shell. Do NOT modify "
-            f"another profile's skills/plugins/cron/memories unless the user "
-            f"explicitly directs you to."
-        )
+        if _rhodiz_mode:
+            post_workspace_parts.append(
+                f"Active RHODIZ profile: {active_profile}. This is an isolated execution context. "
+                "Do not modify another profile's skills, plugins, schedules, or memories unless "
+                "the user explicitly directs you to."
+            )
+        else:
+            post_workspace_parts.append(
+                f"Active Hermes profile: {active_profile}. This session reads "
+                f"and writes {profile_home}/. The default "
+                f"profile's data lives at {default_root}/skills/, {default_root}/plugins/, "
+                f"{default_root}/cron/, {default_root}/memories/ — those belong to a "
+                f"different session run from a different shell. Do NOT modify "
+                f"another profile's skills/plugins/cron/memories unless the user "
+                f"explicitly directs you to."
+            )
 
     platform_key = (agent.platform or "").lower().strip()
     # Resolve the built-in/plugin default hint for this platform, then apply
@@ -1026,11 +1065,20 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         timestamp_line += f"\nPlatform: {agent.platform}"
     volatile_parts.append(timestamp_line)
 
-    return {
+    parts = {
         "stable":   "\n\n".join(p.strip() for p in stable_parts   if p and p.strip()),
         "context":  "\n\n".join(p.strip() for p in context_parts  if p and p.strip()),
         "volatile": "\n\n".join(p.strip() for p in volatile_parts if p and p.strip()),
     }
+    if _rhodiz_mode:
+        parts = {
+            key: sanitize_model_visible_text(value, home=_product_home)
+            for key, value in parts.items()
+        }
+        assert_rhodiz_model_context_clean(
+            "\n\n".join(parts.values()), home=_product_home
+        )
+    return parts
 
 
 def build_system_prompt(agent: Any, system_message: Optional[str] = None) -> str:

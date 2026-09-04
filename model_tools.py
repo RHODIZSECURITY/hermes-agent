@@ -39,6 +39,7 @@ from tools.registry import (
     tool_error,
 )
 from toolsets import resolve_toolset, validate_toolset
+from agent.product_identity import is_rhodiz_product_mode, sanitize_tool_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +372,7 @@ def get_tool_definitions(
                 cfg_fp,
                 bool(os.environ.get("HERMES_KANBAN_TASK")),
                 bool(skip_tool_search_assembly),
+                is_rhodiz_product_mode(),
                 _is_delegated_child_context(),
                 _is_dispatcher_owned_worker(),
                 profile_scope,
@@ -388,6 +390,8 @@ def get_tool_definitions(
 
     result = _compute_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode,
                                        skip_tool_search_assembly=skip_tool_search_assembly)
+    if is_rhodiz_product_mode():
+        result = sanitize_tool_definitions(result)
     if quiet_mode and cache_key is not None:
         # Cache the freshly-computed list, but hand callers a shallow copy so
         # downstream mutations (e.g. run_agent appending memory/LCM tool

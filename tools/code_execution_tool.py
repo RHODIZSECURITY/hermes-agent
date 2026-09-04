@@ -379,6 +379,9 @@ def check_sandbox_requirements() -> bool:
 # hermes_tools.py code generator
 # ---------------------------------------------------------------------------
 
+_RHODIZ_TOOLS_ALIAS_SOURCE = "from hermes_tools import *\n"
+
+
 # Per-tool stub templates: (function_name, signature, docstring, args_dict_expr)
 # The args_dict_expr builds the JSON payload sent over the RPC socket.
 _TOOL_STUBS = {
@@ -442,7 +445,7 @@ def _sandbox_failure_hint(stderr_text: str, enabled_tools=None) -> Optional[str]
     window = stderr_text[:4000]
     try:
         m = re.search(
-            r"cannot import name '(\w+)' from 'hermes_tools'", window
+            r"cannot import name '(\w+)' from '(?:hermes_tools|rhodiz_tools)'", window
         )
         if m:
             missing = m.group(1)
@@ -1312,6 +1315,7 @@ def _execute_remote(
             list(sandbox_tools), transport="file",
         )
         _ship_file_to_remote(env, f"{sandbox_dir}/hermes_tools.py", tools_src)
+        _ship_file_to_remote(env, f"{sandbox_dir}/rhodiz_tools.py", _RHODIZ_TOOLS_ALIAS_SOURCE)
         _ship_file_to_remote(env, f"{sandbox_dir}/script.py", code)
 
         # Wrapped so the thread inherits the turn's approval context + callbacks
@@ -1708,6 +1712,8 @@ def execute_code(
         tools_src = generate_hermes_tools_module(list(sandbox_tools))
         with open(os.path.join(tmpdir, "hermes_tools.py"), "w", encoding="utf-8") as f:
             f.write(tools_src)
+        with open(os.path.join(tmpdir, "rhodiz_tools.py"), "w", encoding="utf-8") as f:
+            f.write(_RHODIZ_TOOLS_ALIAS_SOURCE)
 
         # Write the user's script
         with open(os.path.join(tmpdir, "script.py"), "w", encoding="utf-8") as f:
@@ -2388,7 +2394,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
             "Scripts run in the session's working directory. Interpreter: "
             "the project's activated venv/conda python when one is active "
             "(VIRTUAL_ENV/CONDA_PREFIX — matches terminal()); otherwise "
-            "Hermes's own python (the common case — stdlib plus Hermes's "
+            "the RHODIZ runtime python (the common case — stdlib plus runtime "
             "deps; check `import x` before relying on project packages)."
         )
 
@@ -2398,7 +2404,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
     # a kernel fail open to per-call silently — not worth schema words;
     # the result's `kernel` field tells the truth per call.
     description = (
-        "Run Python that calls Hermes tools programmatically. Use when you "
+        "Run Python that calls RHODIZ tools programmatically. Use when you "
         "need 3+ tool calls with logic between them: filtering/reducing "
         "large outputs before they enter context, branching, or loops "
         "(N pages/files, retry on failure). Use normal tool calls for "
@@ -2408,7 +2414,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
         "loaded data survive across execute_code calls, so build on earlier "
         "work instead of re-loading it. A timed-out or interrupted call "
         "loses that state.\n\n"
-        f"Available via `from hermes_tools import ...`:\n\n"
+        f"Available via `from rhodiz_tools import ...`:\n\n"
         f"{tool_lines}\n\n"
         "Limits: 5-minute timeout, max 50 tool calls per call. Stdout over "
         "50KB shows head/tail inline; the FULL text is auto-saved to a file "
@@ -2430,7 +2436,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
                     "type": "string",
                     "description": (
                         "Python code to execute. Import tools with "
-                        f"`from hermes_tools import {import_str}` "
+                        f"`from rhodiz_tools import {import_str}` "
                         "and print your final result to stdout."
                     ),
                 },

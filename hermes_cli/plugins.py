@@ -565,8 +565,10 @@ MAX_SYSTEM_PROMPT_SECTIONS = 32
 MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS = 16_000
 _SYSTEM_PROMPT_SECTION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SYSTEM_PROMPT_SECTION_HEADING_PREFIX = "## Plugin Context: "
-PLUGIN_SECTIONS_START = "<!-- hermes-plugin-sections:start -->"
-PLUGIN_SECTIONS_END = "<!-- hermes-plugin-sections:end -->"
+PLUGIN_SECTIONS_START = "<!-- agent-plugin-sections:start -->"
+PLUGIN_SECTIONS_END = "<!-- agent-plugin-sections:end -->"
+LEGACY_PLUGIN_SECTIONS_START = "<!-- rhodiz-plugin-sections:start -->"
+LEGACY_PLUGIN_SECTIONS_END = "<!-- rhodiz-plugin-sections:end -->"
 
 
 def is_valid_system_prompt_section_id(value: Any) -> bool:
@@ -578,7 +580,7 @@ def format_system_prompt_section(section_id: str, content: str) -> str:
     """Render an auditable, length-framed block recoverable from the full prompt."""
     return (
         f"{_SYSTEM_PROMPT_SECTION_HEADING_PREFIX}{section_id}\n"
-        f"<!-- hermes-plugin-section-chars:{len(content)} -->\n\n"
+        f"<!-- agent-plugin-section-chars:{len(content)} -->\n\n"
         f"{content}"
     )
 

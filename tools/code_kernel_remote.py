@@ -291,6 +291,7 @@ def _spawn_remote_kernel(env, env_type: str, owner: str, task_env_id: str,
             list(sandbox_tools), transport="file",
         )
         _ship_file_to_remote(env, f"{kernel_dir}/hermes_tools.py", tools_src)
+        _ship_file_to_remote(env, f"{kernel_dir}/rhodiz_tools.py", "from hermes_tools import *\n")
 
         env_prefix = (
             f"HERMES_KERNEL_DIR={q_dir} "

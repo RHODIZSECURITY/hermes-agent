@@ -101,3 +101,16 @@ def test_explicit_eight_kib_section_is_supported_for_bounded_product_persona():
     assert [(item.id, item.content) for item in rendered] == [
         ("rhodiz.personality", content)
     ]
+
+
+def test_product_prompt_markers_are_brand_neutral():
+    from hermes_cli.plugins import (
+        PLUGIN_SECTIONS_END,
+        PLUGIN_SECTIONS_START,
+        format_system_prompt_section,
+    )
+    rendered = format_system_prompt_section("rhodiz.personality", "RHODIZ IA")
+    assert "hermes" not in PLUGIN_SECTIONS_START.lower()
+    assert "hermes" not in PLUGIN_SECTIONS_END.lower()
+    assert "hermes" not in rendered.lower()
+    assert "agent-plugin-section-chars" in rendered

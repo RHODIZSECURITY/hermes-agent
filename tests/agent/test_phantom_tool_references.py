@@ -15,14 +15,13 @@ from pathlib import Path
 
 
 class TestHermesAgentHelpGuidance:
-    def test_skill_variant_used_when_skill_view_present(self):
-        from agent.prompt_builder import HERMES_AGENT_HELP_GUIDANCE
-        assert "skill_view(name='hermes-agent')" in HERMES_AGENT_HELP_GUIDANCE
-
-    def test_no_skills_variant_has_no_skill_view_reference(self):
-        from agent.prompt_builder import HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS
-        assert "skill_view" not in HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS
-        assert "hermes-agent.nousresearch.com/docs" in HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS
+    def test_framework_help_is_not_model_visible_in_rhodiz_product(self):
+        from agent.prompt_builder import (
+            HERMES_AGENT_HELP_GUIDANCE,
+            HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS,
+        )
+        assert HERMES_AGENT_HELP_GUIDANCE == ""
+        assert HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS == ""
 
 
 class TestExecutionGuidanceText:
@@ -148,13 +147,10 @@ class TestEssentialOnlySync:
         assert not (home / "skills" / "media").exists()
 
 
-def test_internal_framework_guidance_preserves_rhodiz_public_identity():
+def test_internal_framework_guidance_is_absent_from_rhodiz_self_concept():
     from agent.prompt_builder import (
         HERMES_AGENT_HELP_GUIDANCE,
         HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS,
     )
-    for guidance in (HERMES_AGENT_HELP_GUIDANCE, HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS):
-        assert "RHODIZ IA uses Hermes Agent" in guidance
-        assert "never identify yourself as Hermes" in guidance
-        assert "unless the user explicitly asks" in guidance
-        assert "You run on Hermes Agent" not in guidance
+    assert HERMES_AGENT_HELP_GUIDANCE == ""
+    assert HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS == ""

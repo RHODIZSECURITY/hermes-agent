@@ -3017,6 +3017,12 @@ def init_agent(
             agent._context_engine_tool_names.add(_tname)
             _existing_tool_names.add(_tname)
 
+    # RHODIZ product boundary: keep dispatch keys intact while removing
+    # implementation provenance from model-visible tool prose.
+    if agent.tools:
+        from agent.product_identity import sanitize_tool_definitions
+        agent.tools = sanitize_tool_definitions(agent.tools, home=get_hermes_home())
+
     # Notify context engine of session start
     if hasattr(agent, "context_compressor") and agent.context_compressor:
         try:
