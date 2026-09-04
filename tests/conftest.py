@@ -953,16 +953,21 @@ def _ensure_current_event_loop(request):
     except RuntimeError:
         pass
 
+    created = False
     if loop is None and sys.version_info < (3, 12):
         try:
+            # On 3.11 the policy may create a loop implicitly. Once this
+            # fixture asks for that loop, it owns its lifecycle and must close
+            # it during teardown just like an explicitly-created loop.
             loop = asyncio.get_event_loop_policy().get_event_loop()
+            created = loop is not None and not loop.is_closed()
         except RuntimeError:
             loop = None
 
-    created = loop is None or loop.is_closed()
-    if created:
+    if loop is None or loop.is_closed():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        created = True
 
     try:
         yield
