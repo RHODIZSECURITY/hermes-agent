@@ -169,6 +169,7 @@ class TestSlashCommands:
         assert response_text == "status via alias"
         runner._handle_status_command.assert_awaited_once()
         runner._handle_message_with_agent.assert_not_awaited()
+        await adapter.disconnect()
 
 
     @pytest.mark.asyncio
@@ -193,6 +194,7 @@ class TestSlashCommands:
         assert response_text == "voice-only output enabled"
         runner._handle_voice_command.assert_awaited_once()
         runner._handle_message_with_agent.assert_not_awaited()
+        await adapter.disconnect()
 
 
 
