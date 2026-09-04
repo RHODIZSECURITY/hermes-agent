@@ -664,6 +664,7 @@ class TestVoiceChannelCommands:
         mock_channel = AsyncMock()
         mock_adapter._client = MagicMock()
         mock_adapter._client.get_channel = MagicMock(return_value=mock_channel)
+        mock_adapter._resolve_channel_prompt = None
         mock_adapter.handle_message = AsyncMock()
         runner.adapters[Platform.DISCORD] = mock_adapter
         await runner._handle_voice_channel_input(111, 42, "Hello from VC")
@@ -712,6 +713,7 @@ class TestVoiceChannelCommands:
         mock_channel = AsyncMock()
         mock_adapter._client = MagicMock()
         mock_adapter._client.get_channel = MagicMock(return_value=mock_channel)
+        mock_adapter._resolve_channel_prompt = None
         mock_adapter.handle_message = AsyncMock()
         runner.adapters[Platform.DISCORD] = mock_adapter
 
