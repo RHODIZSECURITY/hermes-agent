@@ -416,7 +416,21 @@ class StreamingTTSConsumer:
             return self._completed
         try:
             await asyncio.wait_for(asyncio.shield(self._task), timeout=timeout)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except asyncio.TimeoutError:
+            # ``abort()`` is allowed to interrupt a provider iterator that is
+            # currently blocked inside ``asyncio.to_thread(next, ...)``.  The
+            # worker thread itself cannot be killed safely, but the asyncio drain
+            # task must not survive the turn/event-loop teardown.  After the
+            # graceful abort budget expires, cancel and REAP that task here.
+            if self._aborted and not self._task.done():
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
             pass
         except Exception:
             pass

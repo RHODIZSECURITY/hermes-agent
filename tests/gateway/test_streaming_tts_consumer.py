@@ -633,11 +633,16 @@ class TestPostAudioTimeoutAbort:
 
             # Simulate the outer loop's abort-on-timeout behaviour.
             consumer.abort("streaming TTS finalisation timeout")
-            await asyncio.sleep(0.05)
+            # Mirror the real gateway teardown: abort is a synchronous signal,
+            # then wait for the drain task to own and release its async resources.
+            await consumer.wait_complete(timeout=0.05)
 
-            # The consumer must not complete later in the background.
+            # The consumer must not complete later in the background, and its
+            # asyncio drain task must be reaped even if the provider thread is
+            # still blocked in ``next()``.
             assert consumer.completed is False
             assert consumer._aborted is True
+            assert consumer.done is True
 
         _run_test(run)
 
