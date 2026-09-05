@@ -71,6 +71,8 @@ def _make_runner():
     runner._agent_cache = {}
     runner._agent_cache_lock = threading.Lock()
     runner._session_model_overrides = {}
+    # Mirror GatewayRunner.__init__: voice-output helpers read this state.
+    runner._voice_mode = {}
     runner.hooks = SimpleNamespace(loaded_hooks=False)
     runner.config = SimpleNamespace(streaming=None, multiplex_profiles=False)
     runner.session_store = SimpleNamespace(
@@ -151,7 +153,9 @@ def test_run_agent_voice_turn_no_name_error(monkeypatch, tmp_path):
         )
         return result
 
-    result = asyncio.new_event_loop().run_until_complete(_run())
+    # asyncio.run owns and closes its loop; a bare new_event_loop().run_until_complete
+    # leaked the loop after this regression test and polluted the wider voice gate.
+    result = asyncio.run(_run())
     assert result["final_response"] == "Hello from the agent."
 
 
