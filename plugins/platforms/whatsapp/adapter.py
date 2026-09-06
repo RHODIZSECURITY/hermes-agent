@@ -21,6 +21,7 @@ import os
 import platform
 import re
 import signal
+import stat
 import subprocess
 
 _IS_WINDOWS = platform.system() == "Windows"
@@ -56,6 +57,39 @@ def _wenv(name: str, default: str = "") -> str:
     return val if val is not None else default
 
 logger = logging.getLogger(__name__)
+
+_BRIDGE_CONTROL_TOKEN_FILE = ".bridge-control-token"
+_BRIDGE_CONTROL_HEADER = "X-Hermes-Bridge-Token"
+
+
+def _bridge_control_headers(session_path: Path) -> Dict[str, str]:
+    """Return auth headers for bridges that publish an owner-only control token.
+
+    The token is bridge-owned so adapters never need a user-facing secret. A
+    bridge that does not implement this contract (for example older/bundled
+    transports) simply has no token file and retains its existing behavior.
+    When a token file exists but is unsafe or malformed we intentionally return
+    no credential; an authenticated bridge then rejects the request fail-closed.
+    """
+    token_path = Path(session_path) / _BRIDGE_CONTROL_TOKEN_FILE
+    try:
+        info = token_path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            logger.error("[Whatsapp] Refusing unsafe bridge control token path: %s", token_path)
+            return {}
+        if os.name == "posix" and (stat.S_IMODE(info.st_mode) & 0o077):
+            logger.error("[Whatsapp] Bridge control token is not owner-only: %s", token_path)
+            return {}
+        token = token_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        logger.error("[Whatsapp] Could not read bridge control token %s: %s", token_path, exc)
+        return {}
+    if len(token) < 32 or any(ch.isspace() for ch in token):
+        logger.error("[Whatsapp] Bridge control token is malformed: %s", token_path)
+        return {}
+    return {_BRIDGE_CONTROL_HEADER: token}
 
 # Inbound owner-typed WhatsApp text is prefixed at MessageEvent construction so
 # transcripts stay disambiguated even if downstream plugins fail before silent_ingest.
@@ -706,7 +740,9 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                                     print(f"[{self.name}] Using existing bridge (status: {bridge_status})")
                                     self._mark_connected()
                                     self._bridge_process = None  # Not managed by us
-                                    self._http_session = aiohttp.ClientSession()
+                                    self._http_session = aiohttp.ClientSession(
+                                        headers=_bridge_control_headers(self._session_path)
+                                    )
                                     self._poll_task = asyncio.create_task(self._poll_messages())
                                     # Plugin-registered native handlers.
                                     self._wire_plugin_handlers(None)
@@ -863,7 +899,9 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                     print(f"[{self.name}]   If session expired, re-pair: hermes whatsapp")
             
             # Create a persistent HTTP session for all bridge communication
-            self._http_session = aiohttp.ClientSession()
+            self._http_session = aiohttp.ClientSession(
+                headers=_bridge_control_headers(self._session_path)
+            )
 
             # Start message polling task
             self._poll_task = asyncio.create_task(self._poll_messages())
@@ -1772,6 +1810,11 @@ async def _standalone_send(
         return {"error": "aiohttp not installed. Run: pip install aiohttp"}
     try:
         bridge_port = extra.get("bridge_port", 3000)
+        bridge_session_path = Path(extra.get(
+            "session_path",
+            get_hermes_dir("platforms/whatsapp/session", "whatsapp/session"),
+        ))
+        bridge_headers = _bridge_control_headers(bridge_session_path)
         normalized_chat_id = to_whatsapp_jid(chat_id)
         media = media_files or []
         text = message or ""
@@ -1779,7 +1822,7 @@ async def _standalone_send(
         # a caption is never silently repeated across a multi-file send.
         media_caption = caption if (caption and len(media) == 1) else None
         last_message_id = None
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=bridge_headers) as session:
             # 1) Text first (skip the /send call when this chunk is media-only
             #    or when the text is delivered as the media caption instead).
             if text.strip() and not media_caption:
