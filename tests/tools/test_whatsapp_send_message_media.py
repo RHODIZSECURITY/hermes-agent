@@ -16,7 +16,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.platforms.whatsapp.adapter import _bridge_media_type, _standalone_send
+from plugins.platforms.whatsapp.adapter import (
+    _bridge_control_headers,
+    _bridge_media_type,
+    _standalone_send,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +101,57 @@ def _tmpfile(suffix):
     f.write(b"x")
     f.close()
     return f.name
+
+
+def test_bridge_control_headers_accept_owner_only_token(tmp_path):
+    token = "A" * 43
+    token_path = tmp_path / ".bridge-control-token"
+    token_path.write_text(token, encoding="utf-8")
+    token_path.chmod(0o600)
+
+    assert _bridge_control_headers(tmp_path) == {"X-Hermes-Bridge-Token": token}
+
+
+def test_bridge_control_headers_missing_token_keeps_legacy_bridge_compatible(tmp_path):
+    assert _bridge_control_headers(tmp_path) == {}
+
+
+def test_bridge_control_headers_reject_insecure_permissions(tmp_path):
+    token_path = tmp_path / ".bridge-control-token"
+    token_path.write_text("B" * 43, encoding="utf-8")
+    token_path.chmod(0o644)
+
+    assert _bridge_control_headers(tmp_path) == {}
+
+
+def test_bridge_control_headers_reject_symlink(tmp_path):
+    target = tmp_path / "real-token"
+    target.write_text("C" * 43, encoding="utf-8")
+    target.chmod(0o600)
+    (tmp_path / ".bridge-control-token").symlink_to(target)
+
+    assert _bridge_control_headers(tmp_path) == {}
+
+
+def test_standalone_send_authenticates_to_control_bridge(tmp_path):
+    token = "D" * 43
+    token_path = tmp_path / ".bridge-control-token"
+    token_path.write_text(token, encoding="utf-8")
+    token_path.chmod(0o600)
+    session_ctx, calls = _session_with([_resp(200, {"messageId": "t1"})])
+    cfg = SimpleNamespace(
+        token="",
+        extra={"bridge_port": 3000, "session_path": str(tmp_path)},
+    )
+
+    with patch("aiohttp.ClientSession", return_value=session_ctx) as client_session:
+        res = asyncio.run(_standalone_send(cfg, "12345", "authenticated hello"))
+
+    assert res["success"] is True
+    client_session.assert_called_once_with(
+        headers={"X-Hermes-Bridge-Token": token}
+    )
+    assert calls[0][0].endswith("/send")
 
 
 def test_text_plus_mixed_media_routes_native_types():
