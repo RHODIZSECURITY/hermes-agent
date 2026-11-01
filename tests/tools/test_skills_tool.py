@@ -264,17 +264,25 @@ class TestRhodizProductSkillBoundary:
         skills_dir.mkdir(parents=True)
         (home / ".rhodiz-product").write_text("RHODIZ IA\n", encoding="utf-8")
         _make_skill(skills_dir, "hermes-agent", category="internal")
+        _make_skill(skills_dir, "hermes-agent-skill-authoring", category="software-development")
+        _make_skill(skills_dir, "inspecting-hermes-desktop-dom", category="software-development")
         _make_skill(skills_dir, "github", category="devops")
         monkeypatch.setenv("HERMES_HOME", str(home))
 
         with patch("tools.skills_tool.SKILLS_DIR", skills_dir):
             listed = json.loads(skills_list())
             blocked = json.loads(skill_view("hermes-agent"))
+            authoring = json.loads(skill_view("hermes-agent-skill-authoring"))
+            desktop = json.loads(skill_view("inspecting-hermes-desktop-dom"))
 
         names = {item["name"] for item in listed["skills"]}
         assert "github" in names
         assert "hermes-agent" not in names
+        assert "hermes-agent-skill-authoring" in names
+        assert "inspecting-hermes-desktop-dom" in names
         assert blocked["success"] is False
+        assert authoring["success"] is True
+        assert desktop["success"] is True
         assert "RHODIZ product sessions" in blocked["error"]
         assert "Hermes" not in blocked["error"]
 
