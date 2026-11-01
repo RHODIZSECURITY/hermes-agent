@@ -33,7 +33,40 @@ def test_internal_skills_are_removed_from_model_visible_index(tmp_path):
     ])
     out = filter_internal_skill_prompt(raw, home=home)
     assert "github" in out and "python-debugpy" in out
-    assert "hermes" not in out.lower()
+    assert "- hermes-agent:" not in out
+    assert "- inspecting-hermes-desktop-dom:" in out
+
+
+def test_reviewed_technical_skill_names_are_visible_without_rebranding_identity(tmp_path):
+    home = _home(tmp_path)
+    raw = "\n".join([
+        "- hermes-agent: framework identity and maintenance",
+        "- hermes-agent-skill-authoring: author valid SKILL.md documents",
+        "- inspecting-hermes-desktop-dom: inspect desktop UI via CDP",
+        "- inspecting-hermes-other: unreviewed framework reference",
+    ])
+    index = filter_internal_skill_prompt(raw, home=home)
+    assert "- hermes-agent:" not in index
+    assert "inspecting-hermes-other" not in index
+    assert "hermes-agent-skill-authoring" in index
+    assert "inspecting-hermes-desktop-dom" in index
+    assert is_internal_maintenance_skill("hermes-agent", home=home)
+    assert not is_internal_maintenance_skill("hermes-agent-skill-authoring", home=home)
+    assert not is_internal_maintenance_skill("software-development/inspecting-hermes-desktop-dom", home=home)
+    assert is_internal_maintenance_skill("hermes-agent-unreviewed", home=home)
+
+    output = sanitize_model_visible_text(
+        "Use hermes-agent-skill-authoring and inspecting-hermes-desktop-dom. "
+        "Hermes Agent is the implementation, not the product identity.",
+        home=home,
+    )
+    assert "hermes-agent-skill-authoring" in output
+    assert "inspecting-hermes-desktop-dom" in output
+    assert "Hermes Agent" not in output
+    assert "RHODIZ IA" in output
+    assert_rhodiz_model_context_clean(output, home=home)
+    with pytest.raises(RuntimeError):
+        assert_rhodiz_model_context_clean("You are Hermes Agent", home=home)
 
 
 def test_tool_schema_sanitizer_changes_only_prose_not_dispatch_metadata(tmp_path):
