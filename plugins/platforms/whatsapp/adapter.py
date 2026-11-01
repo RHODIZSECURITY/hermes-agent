@@ -415,7 +415,20 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 return True, None
 
     def _ensure_bridge_deps(self, bridge_dir: Path) -> bool:
-        """npm install when node_modules is missing OR package.json hash != stamp file. False = fatal error set."""
+        """Verify RHODIZ WWEBJS installs; other bridge backends use upstream behavior."""
+        from .bridge_integrity import is_rhodiz_wwebjs_bridge, verified_bridge_integrity
+        if is_rhodiz_wwebjs_bridge(bridge_dir):
+            if verified_bridge_integrity(bridge_dir):
+                return True
+            self._set_fatal_error(
+                "rhodiz_whatsapp_bridge_unverified",
+                "RHODIZ WWEBJS bridge lacks a verified dependency snapshot. "
+                "Run the reviewed npm-ci/audit/test installer during maintenance; "
+                "Hermes must not run automatic npm install on this bridge.",
+                retryable=False,
+            )
+            return False
+        # Bundled upstream Baileys remains subject to its normal lifecycle.
         _dep_stamp = bridge_dir / "node_modules" / ".hermes-pkg-hash"  # holds the package.json hash of the last install
         _pkg_hash = _file_content_hash(bridge_dir / "package.json")
         try:
@@ -472,7 +485,16 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             # startup, reconnect or QR wait reports "disconnected". A bridge without ``session`` predates the
             # field, so its scriptHash no longer matches bridge.js and it restarts as stale below.
             reported_session = data.get("session")
-            if reported_session and reported_session != str(self._session_path):
+            if not isinstance(reported_session, str) or not reported_session.strip():
+                from .bridge_integrity import is_rhodiz_wwebjs_bridge
+                # WWEBJS must prove account ownership. Never restart a live
+                # unrelated browser just because the script hash matches.
+                if is_rhodiz_wwebjs_bridge(bridge_path.parent) or data.get("status") == "connected":
+                    self._foreign_bridge_session = "<unverified bridge session>"
+                # Keep the upstream Baileys disconnected-restart path, but
+                # still never adopt a session-less bridge.
+                return False
+            if os.path.normcase(os.path.abspath(reported_session)) != os.path.normcase(str(self._session_path)):
                 self._foreign_bridge_session = reported_session
                 return False
             bridge_status = data.get("status", "unknown")

@@ -741,6 +741,12 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     timestamp line, runtime environment hints).  Worktree-dependent blocks follow project context so a
     shared context file can remain in the longest common prefix across worktrees.
     Never re-rendered mid-session."""
+    from agent.product_identity import (
+        is_rhodiz_product_mode, filter_internal_skill_prompt,
+        sanitize_model_visible_text, assert_rhodiz_model_context_clean,
+    )
+    _product_home = _agent_home(agent)
+    _rhodiz_mode = is_rhodiz_product_mode(_product_home)
     # Model context window scales the context-file caps; stable per conversation.
     _cc_len = getattr(getattr(agent, "context_compressor", None), "context_length", None)
     _ctx_len = _cc_len if isinstance(_cc_len, int) and _cc_len > 0 else None
@@ -750,12 +756,14 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # hermes-agent skill installed, so the variant is chosen after the skills
     # index is built; this slot holds its position.
     _help_guidance_slot = len(stable_parts)
-    stable_parts.append(HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS)
+    stable_parts.append("" if _rhodiz_mode else HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS)
     stable_parts.extend(_guidance_parts(agent))
     skills_prompt = _skills_prompt(agent)
+    if _rhodiz_mode:
+        skills_prompt = filter_internal_skill_prompt(skills_prompt, home=_product_home)
     # Skill-pointer variant requires BOTH skill_view AND the hermes-agent skill
     # in the rendered index (pure string check — inherits the index's stability).
-    if "skill_view" in (agent.valid_tool_names or set()) and "- hermes-agent:" in skills_prompt:
+    if (not _rhodiz_mode and "skill_view" in (agent.valid_tool_names or set()) and "- hermes-agent:" in skills_prompt):
         stable_parts[_help_guidance_slot] = HERMES_AGENT_HELP_GUIDANCE
     stable_parts.extend(_alibaba_identity_part(agent))
     # Pinned skills are per-agent constants (resolved once), so they live in the stable prefix.
@@ -796,7 +804,13 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         # Embedder hints are prose too; reserve the delimiter for the renderer.
         environment_hints = environment_hints.replace(_pb.RUNTIME_ENVIRONMENT_HEADING, "> " + _pb.RUNTIME_ENVIRONMENT_HEADING)
         volatile_parts.append(f"{_pb.RUNTIME_ENVIRONMENT_HEADING}\n\n{environment_hints}\n\n{_pb.RUNTIME_ENVIRONMENT_END}")
-    return {"stable": _join_tier(stable_parts), "context": _join_tier(context_parts), "volatile": _join_tier(volatile_parts)}
+    tiers = {"stable": _join_tier(stable_parts), "context": _join_tier(context_parts),
+             "volatile": _join_tier(volatile_parts)}
+    if _rhodiz_mode:
+        tiers = {key: sanitize_model_visible_text(value, home=_product_home)
+                 for key, value in tiers.items()}
+        assert_rhodiz_model_context_clean("\n\n".join(tiers.values()), home=_product_home)
+    return tiers
 
 
 def build_system_prompt(agent: Any, system_message: Optional[str] = None) -> str:
