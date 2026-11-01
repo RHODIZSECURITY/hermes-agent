@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           uv sync --locked --no-default-groups --python 3.14 --no-progress
-          uv pip install --python .venv/bin/python 'pytest==9.1.1' 'pytest-asyncio==1.3.0'
+          uv pip install --python .venv/bin/python 'pytest==9.1.1' 'pytest-asyncio==1.3.0' 'aiohttp==3.14.5'
       - name: Test against a Git-free isolated copy and synthetic profile home
         run: |
           set -euo pipefail
@@ -85,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           uv sync --locked --no-default-groups --python 3.14 --no-progress
-          uv pip install --python .venv/bin/python 'pytest==9.1.1' 'pytest-asyncio==1.3.0'
+          uv pip install --python .venv/bin/python 'pytest==9.1.1' 'pytest-asyncio==1.3.0' 'aiohttp==3.14.5'
       - name: Execute local gateway process E2E with a fake LLM (no WhatsApp credentials)
         run: |
           set -euo pipefail
