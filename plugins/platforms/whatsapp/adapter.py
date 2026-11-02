@@ -529,9 +529,11 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         except TimeoutError:
             self._bridge_probe_timed_out = True  # something holds the port but gave no identity; connect() leaves it
         except Exception:
-            # Connection errors do not prove the port is free. Never kill
-            # an unrelated local process after an unsuccessful probe.
-            self._bridge_probe_timed_out = True
+            # A transport error cannot prove bridge ownership, but is not a
+            # *timeout* either. The WWEBJS port-holder check in connect()
+            # forbids killing an unverified listener; preserve Baileys
+            # historical startup/cleanup behavior for a genuinely free port.
+            pass
         return False
 
     def _bridge_env(self) -> dict:
