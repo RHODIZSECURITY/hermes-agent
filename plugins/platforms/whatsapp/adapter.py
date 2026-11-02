@@ -957,10 +957,10 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         if await self._bridge_unavailable():
             return
         with suppress(Exception):
-            import aiohttp
-            # ``async with`` — a bare ``await session.post(...)`` leaves the response (and its CLOSE_WAIT socket) alive until GC.
-            async with self._http_session.post(self._bridge_url("typing"), json={"chatId": to_whatsapp_jid(chat_id)}, timeout=aiohttp.ClientTimeout(total=5)):
-                pass
+            # Share the same authenticated HTTP path as messages and receipts.
+            async with self._bridge_req("post", "typing", 5, json={"chatId": to_whatsapp_jid(chat_id)}) as resp:
+                if resp.status != 200:
+                    logger.warning("[%s] WhatsApp typing indicator failed with HTTP %s", self.name, resp.status)
 
     async def get_chat_info(self, chat_id: str) -> dict[str, Any]:
         if not self._running or not self._http_session:
