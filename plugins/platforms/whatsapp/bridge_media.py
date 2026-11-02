@@ -28,7 +28,10 @@ def stage_outbound_media(source: str, media_kind: str) -> str:
     kind = media_kind.lower().strip()
     if kind not in {"image", "audio", "voice", "ptt", "video", "document"}:
         raise ValueError("Unsupported WhatsApp media type")
-    fd = os.open(str(src), os.O_RDONLY | os.O_NOFOLLOW)
+    # O_NONBLOCK: opening a FIFO with O_RDONLY alone blocks until a
+    # writer appears, hanging the adapter inside open(); the fstat below
+    # rejects non-regular files anyway, so open() must never wait.
+    fd = os.open(str(src), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_size < 1 or before.st_size > MAX_MEDIA_BYTES:
