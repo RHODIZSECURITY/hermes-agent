@@ -162,3 +162,27 @@ async def test_busy_wwebjs_port_is_never_killed_by_tcp_scan(tmp_path, monkeypatc
     adapter._set_fatal_error.assert_called_once()
     assert adapter._set_fatal_error.call_args.args[0] == "whatsapp_bridge_unverified_port"
     adapter._release_platform_lock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_typing_indicator_uses_authenticated_bridge_path():
+    """A forgotten direct HTTP call would receive 401 from the WWEBJS guard."""
+    from unittest.mock import AsyncMock, MagicMock
+    from plugins.platforms.whatsapp.adapter import WhatsAppAdapter
+
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    adapter = WhatsAppAdapter.__new__(WhatsAppAdapter)
+    adapter._bridge_unavailable = AsyncMock(return_value=False)
+    adapter._bridge_req = MagicMock(return_value=Response())
+    await adapter.send_typing("15551234567@c.us")
+    adapter._bridge_req.assert_called_once_with(
+        "post", "typing", 5, json={"chatId": "15551234567@c.us"}
+    )
