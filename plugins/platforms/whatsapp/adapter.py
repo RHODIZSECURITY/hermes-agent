@@ -418,12 +418,16 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         headers = _rhodiz_bridge_auth_headers(self._bridge_script)
         async with aiohttp.ClientSession() as session, session.get(self._bridge_url("health"), headers=headers, timeout=aiohttp.ClientTimeout(total=2)) as resp:
             if resp.status != 200:
+                # A 401 from a foreign or stale WWEBJS token is NOT permission
+                # to kill whoever owns the port. Nor is any other non-200.
+                self._foreign_bridge_session = "<unverified HTTP bridge response>"
                 return False, None
             try:
                 return True, await resp.json()
             except TimeoutError:
-                raise  # a body that never arrives is no answer, the same as headers that never arrive
+                raise  # a body that never arrives is no answer
             except Exception:
+                self._foreign_bridge_session = "<unparseable HTTP bridge response>"
                 return True, None
 
     def _ensure_bridge_deps(self, bridge_dir: Path) -> bool:
@@ -525,7 +529,9 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         except TimeoutError:
             self._bridge_probe_timed_out = True  # something holds the port but gave no identity; connect() leaves it
         except Exception:
-            pass  # Bridge not running, start a new one
+            # Connection errors do not prove the port is free. Never kill
+            # an unrelated local process after an unsuccessful probe.
+            self._bridge_probe_timed_out = True
         return False
 
     def _bridge_env(self) -> dict:
@@ -717,7 +723,25 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                             retryable=True,
                         )
                         return False
-                _kill_port_process(self._bridge_port)
+                from .bridge_integrity import is_rhodiz_wwebjs_bridge
+                if is_rhodiz_wwebjs_bridge(bridge_path.parent):
+                    # First-party WWEBJS is never killed by scanning a TCP
+                    # port: another account/profile or arbitrary Node service
+                    # may be holding it. PID-file ownership cleanup ran above.
+                    try:
+                        holder = bool(_port_listener_pids(self._bridge_port))
+                    except Exception:
+                        holder = True
+                    if holder:
+                        self._set_fatal_error(
+                            "whatsapp_bridge_unverified_port",
+                            f"Port {self._bridge_port} is occupied and RHODIZ cannot verify ownership. "
+                            "No process was stopped; use a distinct bridge_port.",
+                            retryable=False,
+                        )
+                        return False
+                else:
+                    _kill_port_process(self._bridge_port)
             if not secondary or prior_bridge_is_ours:
                 await asyncio.sleep(1)
             # Bridge output goes to a log file so QR codes, errors, and reconnection messages survive for troubleshooting.
