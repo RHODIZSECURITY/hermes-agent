@@ -1212,6 +1212,14 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
                         f"WhatsApp bridge on port {bridge_port} answered /health with HTTP {resp.status}; nothing was sent.")
                 health = await resp.json()
             reported_session = health.get("session")
+            if auth_headers and (
+                not isinstance(reported_session, str) or reported_session != own_session
+            ):
+                # A first-party authenticated bridge must prove WHICH session
+                # it serves; no identity is not evidence of ownership.
+                return send_error(
+                    "WhatsApp authenticated bridge session is missing or does not match "
+                    "this profile; nothing was sent.")
             if reported_session and reported_session != own_session:
                 return send_error(
                     f"WhatsApp bridge on port {bridge_port} serves another profile's session ({reported_session}); "
