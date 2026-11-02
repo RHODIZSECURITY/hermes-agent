@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 import sys
@@ -68,3 +69,31 @@ def test_relative_and_unsupported_are_rejected(fake_media_cache):
         MODULE.stage_outbound_media("relative", "image")
     with pytest.raises(ValueError, match="Unsupported"):
         MODULE.stage_outbound_media("/does/not/matter", "arbitrary")
+
+
+def test_fifo_without_writer_is_rejected_without_blocking(tmp_path, fake_media_cache):
+    """A FIFO must never hang staging (regression: open lacked O_NONBLOCK).
+
+    stage_outbound_media opened the source with O_RDONLY | O_NOFOLLOW
+    only, so a FIFO with no writer blocked the adapter forever inside
+    open(). With O_NONBLOCK the open returns at once and the fstat
+    rejects the non-regular file.
+    """
+    fifo = tmp_path / "not-a-file.ogg"
+    os.mkfifo(fifo)
+
+    outcome: dict[str, object] = {}
+
+    def attempt() -> None:
+        try:
+            MODULE.stage_outbound_media(str(fifo), "audio")
+        except BaseException as exc:  # recorded; asserted below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+
+    assert not worker.is_alive(), "stage_outbound_media blocked opening a FIFO"
+    assert isinstance(outcome.get("error"), ValueError)
+    assert fake_media_cache == []
