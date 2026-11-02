@@ -34,3 +34,49 @@ def test_first_party_receives_exact_bearer_header():
 
 def test_upstream_baileys_contract_remains_unchanged():
     assert MODULE.control_headers(False, "") == {}
+
+
+def test_adapter_resolves_bearer_from_own_profile_only(tmp_path, monkeypatch):
+    from plugins.platforms.whatsapp import adapter as adapter_module
+    bridge = tmp_path / "bridge.js"
+    bridge.write_text("synthetic", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        '{"name":"rhodiz-hermes-whatsapp-web-bridge"}', encoding="utf-8"
+    )
+    monkeypatch.setenv(MODULE.TOKEN_ENV, "cd" * 32)  # another profile, must not win
+    monkeypatch.setattr(adapter_module, "_wenv", lambda name, default="": FAKE_TOKEN)
+    assert adapter_module._rhodiz_bridge_auth_headers(bridge) == {
+        "Authorization": "Bearer " + FAKE_TOKEN
+    }
+    monkeypatch.setattr(adapter_module, "_wenv", lambda name, default="": "")
+    with pytest.raises(ValueError, match="missing or invalid"):
+        adapter_module._rhodiz_bridge_auth_headers(bridge)
+
+
+def test_adapter_gateway_posts_include_authorization(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from plugins.platforms.whatsapp import adapter as adapter_module
+
+    (tmp_path / "package.json").write_text(
+        '{"name":"rhodiz-hermes-whatsapp-web-bridge"}', encoding="utf-8"
+    )
+    bridge = tmp_path / "bridge.js"
+    bridge.write_text("synthetic", encoding="utf-8")
+    monkeypatch.setattr(adapter_module, "_wenv", lambda name, default="": FAKE_TOKEN)
+    adapter = adapter_module.WhatsAppAdapter.__new__(adapter_module.WhatsAppAdapter)
+    adapter._bridge_script = str(bridge)
+    adapter._bridge_port = 3000
+    sentinel = object()
+    post = MagicMock(return_value=sentinel)
+    adapter._http_session = SimpleNamespace(post=post)
+    assert adapter._bridge_req("post", "send", 5, json={"message": "test"}) is sentinel
+    assert post.call_args.kwargs["headers"] == {"Authorization": "Bearer " + FAKE_TOKEN}
+    assert post.call_args.kwargs["json"] == {"message": "test"}
+
+
+def test_non_rhodiz_bridge_does_not_require_new_header(tmp_path, monkeypatch):
+    from plugins.platforms.whatsapp import adapter as adapter_module
+    (tmp_path / "package.json").write_text('{"name":"hermes-whatsapp-bridge"}', encoding="utf-8")
+    monkeypatch.setattr(adapter_module, "_wenv", lambda name, default="": "")
+    assert adapter_module._rhodiz_bridge_auth_headers(tmp_path / "bridge.js") == {}
