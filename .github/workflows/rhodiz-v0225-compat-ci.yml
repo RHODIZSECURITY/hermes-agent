@@ -10,6 +10,7 @@ on:
       - "tests/gateway/test_whatsapp_*.py"
       - "tests/gateway/test_rhodiz_wwebjs_bridge_integrity.py"
       - "tests/gateway/test_rhodiz_wwebjs_bridge_control.py"
+      - "tests/gateway/test_rhodiz_wwebjs_bridge_media.py"
       - "tests/agent/test_rhodiz_product_identity.py"
       - "tests/tools/test_skills_tool.py"
       - ".github/workflows/rhodiz-v0225-compat-ci.yml"
@@ -60,6 +61,7 @@ jobs:
             tests/gateway/test_whatsapp_*.py \
             tests/gateway/test_rhodiz_wwebjs_bridge_integrity.py \
             tests/gateway/test_rhodiz_wwebjs_bridge_control.py \
+            tests/gateway/test_rhodiz_wwebjs_bridge_media.py \
             tests/tools/test_whatsapp_send_message_media.py \
             tests/gateway/test_authenticated_session_identity.py \
             tests/gateway/test_multiplex_profile_authz.py \
