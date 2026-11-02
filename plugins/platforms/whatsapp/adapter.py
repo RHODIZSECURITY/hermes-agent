@@ -972,7 +972,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                         data = await resp.json()
                         return {"name": data.get("name", chat_id), "type": "group" if data.get("isGroup") else "dm", "participants": data.get("participants", [])}
             except Exception as e:
-                logger.debug("Could not get WhatsApp chat info for %s: %s", chat_id, e)
+                logger.debug("Could not get WhatsApp chat info")
         return {"name": chat_id, "type": "dm"}
 
     async def _report_bridge_exit(self) -> bool:
@@ -1002,7 +1002,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             except Exception as e:
                 if await self._report_bridge_exit():
                     break
-                print(f"[{self.name}] Poll error: {e}")
+                print(f"[{self.name}] Poll error")
                 await asyncio.sleep(5)
             await asyncio.sleep(1)  # Poll interval
 
@@ -1015,7 +1015,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 if resp.status != 200:
                     logger.warning("[%s] WhatsApp read receipt failed with HTTP %s", self.name, resp.status)
         except Exception as exc:
-            logger.warning("[%s] WhatsApp read receipt failed: %s", self.name, exc)
+            logger.warning("[%s] WhatsApp read receipt failed", self.name)
 
     _SPLIT_THRESHOLD = 6000  # WhatsApp supports ~65K chars; generous threshold
 
@@ -1039,16 +1039,16 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 cacher, ext = (cache_image_from_url, ".jpg") if msg_type == MessageType.PHOTO else (cache_audio_from_url, ".ogg")
                 try:
                     url = await cacher(url, ext=ext)
-                    print(f"[{self.name}] Cached user {label}: {url}", flush=True)
+                    print(f"[{self.name}] Cached user {label}", flush=True)
                 except Exception as e:
-                    print(f"[{self.name}] Failed to cache {label}: {e}", flush=True)
+                    print(f"[{self.name}] Failed to cache {label}", flush=True)
                 accepted.append((url, mime))
             elif label is not None and os.path.isabs(url):
                 if _is_allowed_bridge_path(url):
                     accepted.append((url, mime))
-                    print(f"[{self.name}] Using bridge-cached {label}: {url}", flush=True)
+                    print(f"[{self.name}] Using bridge-cached {label}", flush=True)
                 else:
-                    print(f"[{self.name}] Rejected bridge {label} path outside cache dir: {url}", flush=True)
+                    print(f"[{self.name}] Rejected bridge {label} path outside cache dir", flush=True)
             else:
                 accepted.append((url, "unknown"))
         return [u for u, _ in accepted], [m for _, m in accepted]
@@ -1064,16 +1064,16 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             try:
                 file_size = p.stat().st_size
                 if file_size > _MAX_TEXT_INJECT_BYTES:
-                    print(f"[{self.name}] Skipping text injection for {doc_path} ({file_size} bytes > {_MAX_TEXT_INJECT_BYTES})", flush=True)
+                    print(f"[{self.name}] Skipping text injection ({file_size} bytes > {_MAX_TEXT_INJECT_BYTES})", flush=True)
                     continue
                 content = p.read_text(encoding="utf-8-sig", errors="replace")
                 parts = p.name.split("_", 2)  # strip the doc_<hex>_ prefix for display
                 injection = f"[Content of {parts[2] if len(parts) >= 3 else p.name}]:\n{content}"
                 body = f"{injection}\n\n{body}" if body else injection
                 inlined[i] = True
-                print(f"[{self.name}] Injected text content from: {doc_path}", flush=True)
+                print(f"[{self.name}] Injected document text", flush=True)
             except Exception as e:
-                print(f"[{self.name}] Failed to read document text: {e}", flush=True)
+                print(f"[{self.name}] Failed to read document text", flush=True)
         return body, inlined
 
     def _quoted_media(self, data: dict[str, Any], raw_reply_id: Any) -> list[tuple[str, str]]:
@@ -1087,14 +1087,14 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         accepted: list[tuple[str, str]] = []
         for path in data.get("quotedMediaUrls") or []:
             if not (isinstance(path, str) and os.path.isabs(path) and _is_allowed_bridge_path(path)):
-                print(f"[{self.name}] Rejected quoted-media path outside cache dir: {path}", flush=True)
+                print(f"[{self.name}] Rejected quoted-media path outside cache dir", flush=True)
                 continue
             accepted.append((path, _QUOTED_MIME_BY_BRIDGE_KIND.get(quoted_type, "application/octet-stream")))
         if not accepted and raw_reply_id is not None:
             from gateway import rich_sent_store
             accepted = rich_sent_store.lookup_media(data.get("chatId", ""), str(raw_reply_id))
         for path, _ in accepted:
-            print(f"[{self.name}] Attached quoted-reply media: {path}", flush=True)
+            print(f"[{self.name}] Attached quoted-reply media", flush=True)
         return accepted
 
     async def _build_message_event(self, data: dict[str, Any]) -> Optional[MessageEvent]:
@@ -1142,7 +1142,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 reply_to_is_own_message=self._message_is_reply_to_bot(data) if quoted else False,
             )
         except Exception as e:
-            print(f"[{self.name}] Error building event: {e}")
+            print(f"[{self.name}] Error building event")
             return None
 
 
