@@ -14,6 +14,7 @@ _FILES = (
     "package.json",
     "package-lock.json",
     "bridge.js",
+    "control-auth.js",
     "lib.js",
     "scripts/patch-wwebjs.js",
     "scripts/bridge-integrity.js",
