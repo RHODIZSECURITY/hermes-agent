@@ -606,7 +606,14 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         return None, http_ready, data
 
     async def _wait_for_bridge(self) -> bool:
-        """Phase 1: HTTP up (≤15s). Phase 2: ``status: connected`` (≤15s more; warns but proceeds if still connecting)."""
+        """Phase 1: HTTP up (≤15s). Phase 2: ``status: connected`` (≤15s more).
+
+        Returns True only when the bridge reports ``connected``. A bridge
+        whose HTTP server is up but whose WhatsApp session never connects
+        is a named, retryable failure — never a connected adapter (issue
+        #803: the previous warn-and-proceed path marked the adapter
+        connected with no live WhatsApp session behind it).
+        """
         connected, http_ready, data = await self._poll_bridge_health("Bridge process died (exit code {code})")
         if connected is False:
             return False
@@ -614,13 +621,16 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             return self._bridge_died("Bridge HTTP server did not start in 15s", "whatsapp_bridge_timeout")
         if data.get("status") != "connected":
             print(f"[{self.name}] Bridge HTTP ready, waiting for WhatsApp connection...")
-            connected, _, _ = await self._poll_bridge_health("Bridge process died during connection")
+            connected, _, data = await self._poll_bridge_health("Bridge process died during connection")
             if connected is False:
                 return False
             if connected is None:
-                print(f"[{self.name}] ⚠ WhatsApp not connected after 30s")
-                print(f"[{self.name}]   Bridge log: {self._bridge_log}")
+                last_status = data.get("status") or "unknown"
                 print(f"[{self.name}]   If session expired, re-pair: hermes whatsapp")
+                return self._bridge_died(
+                    f"Bridge HTTP ready but WhatsApp not connected after 30s (last status: {last_status})",
+                    "whatsapp_not_connected",
+                )
         return True
 
     def _preflight(self) -> bool:
