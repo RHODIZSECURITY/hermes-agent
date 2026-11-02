@@ -186,3 +186,54 @@ async def test_typing_indicator_uses_authenticated_bridge_path():
     adapter._bridge_req.assert_called_once_with(
         "post", "typing", 5, json={"chatId": "15551234567@c.us"}
     )
+
+
+@pytest.mark.asyncio
+async def test_standalone_sender_rejects_authenticated_health_without_session(tmp_path, monkeypatch):
+    """A valid bridge token alone cannot establish WhatsApp account ownership."""
+    from types import SimpleNamespace
+    from plugins.platforms.whatsapp import adapter as adapter_module
+    import aiohttp
+
+    (tmp_path / "package.json").write_text(
+        '{"name":"rhodiz-hermes-whatsapp-web-bridge"}', encoding="utf-8"
+    )
+    bridge = tmp_path / "bridge.js"
+    bridge.write_text("synthetic", encoding="utf-8")
+    monkeypatch.setattr(adapter_module, "_wenv", lambda name, default="": FAKE_TOKEN)
+
+    class Health:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {"status": "connected"}  # intentionally lacks session
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        def get(self, url, **kwargs):
+            assert url.endswith("/health")
+            assert kwargs["headers"] == {"Authorization": "Bearer " + FAKE_TOKEN}
+            return Health()
+
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("must never POST to a session-less WWEBJS bridge")
+
+    monkeypatch.setattr(aiohttp, "ClientSession", Client)
+    config = SimpleNamespace(
+        token="",
+        extra={"bridge_script": str(bridge), "bridge_port": 3030,
+               "session_path": str(tmp_path / "session")},
+    )
+    result = await adapter_module._standalone_send(config, "15551234567", "hello")
+    assert "nothing was sent" in result["error"]
