@@ -20,6 +20,8 @@ from gateway.platforms._shared import (
 from gateway.platforms.send_targets import StandaloneSendPolicy, regex_stripped_parser
 from hermes_cli._subprocess_compat import windows_detach_popen_kwargs
 from hermes_constants import (find_node_executable, get_hermes_dir, with_hermes_node_path)
+from .bridge_control import TOKEN_ENV, control_headers
+from .bridge_media import stage_outbound_media
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -27,6 +29,14 @@ _IS_WINDOWS = platform.system() == "Windows"
 def _wenv(name: str, default: str = "") -> str:
     """WHATSAPP_* env via the profile secret scope (multiplexed profiles see their own .env, not the process-global value)."""
     return get_scoped_secret(name, default)
+
+
+def _rhodiz_bridge_auth_headers(bridge_script: str | Path) -> dict[str, str]:
+    """Authenticate only RHODIZ WWEBJS; never borrow another profile's secret."""
+    from .bridge_integrity import is_rhodiz_wwebjs_bridge
+    is_rhodiz = is_rhodiz_wwebjs_bridge(Path(bridge_script).parent)
+    return control_headers(is_rhodiz, _wenv(TOKEN_ENV) if is_rhodiz else "")
+
 
 logger = logging.getLogger(__name__)
 
@@ -399,19 +409,26 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
     def _bridge_req(self, method: str, path: str, timeout: float, **kwargs):
         """``session.<method>`` context manager for a bridge endpoint (caller must ``async with``)."""
         import aiohttp
-        return getattr(self._http_session, method)(self._bridge_url(path), **kwargs, timeout=aiohttp.ClientTimeout(total=timeout))
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers.update(_rhodiz_bridge_auth_headers(self._bridge_script))
+        return getattr(self._http_session, method)(self._bridge_url(path), headers=headers, **kwargs, timeout=aiohttp.ClientTimeout(total=timeout))
 
     async def _probe_bridge_health(self) -> tuple[bool, Any]:
         """GET /health with a fresh session → ``(http_200, json)``; unparseable 200 body → ``(True, None)``; connection errors and timeouts propagate."""
         import aiohttp
-        async with aiohttp.ClientSession() as session, session.get(self._bridge_url("health"), timeout=aiohttp.ClientTimeout(total=2)) as resp:
+        headers = _rhodiz_bridge_auth_headers(self._bridge_script)
+        async with aiohttp.ClientSession() as session, session.get(self._bridge_url("health"), headers=headers, timeout=aiohttp.ClientTimeout(total=2)) as resp:
             if resp.status != 200:
+                # A 401 from a foreign or stale WWEBJS token is NOT permission
+                # to kill whoever owns the port. Nor is any other non-200.
+                self._foreign_bridge_session = "<unverified HTTP bridge response>"
                 return False, None
             try:
                 return True, await resp.json()
             except TimeoutError:
-                raise  # a body that never arrives is no answer, the same as headers that never arrive
+                raise  # a body that never arrives is no answer
             except Exception:
+                self._foreign_bridge_session = "<unparseable HTTP bridge response>"
                 return True, None
 
     def _ensure_bridge_deps(self, bridge_dir: Path) -> bool:
@@ -513,7 +530,11 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         except TimeoutError:
             self._bridge_probe_timed_out = True  # something holds the port but gave no identity; connect() leaves it
         except Exception:
-            pass  # Bridge not running, start a new one
+            # A transport error cannot prove bridge ownership, but is not a
+            # *timeout* either. The WWEBJS port-holder check in connect()
+            # forbids killing an unverified listener; preserve Baileys
+            # historical startup/cleanup behavior for a genuinely free port.
+            pass
         return False
 
     def _bridge_env(self) -> dict:
@@ -547,7 +568,12 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 bridge_env.pop(env_key, None)
         # Without these the bridge hardcodes ~/.hermes/{image,audio,document}_cache (wrong under HERMES_HOME/profiles/cache layout).
         img_dir, audio_dir, _video_dir, doc_dir = _cache_dirs()
-        bridge_env.update(HERMES_IMAGE_CACHE_DIR=str(img_dir), HERMES_AUDIO_CACHE_DIR=str(audio_dir), HERMES_DOCUMENT_CACHE_DIR=str(doc_dir))
+        bridge_env.update(HERMES_IMAGE_CACHE_DIR=str(img_dir), HERMES_AUDIO_CACHE_DIR=str(audio_dir), HERMES_VIDEO_CACHE_DIR=str(_video_dir), HERMES_DOCUMENT_CACHE_DIR=str(doc_dir))
+        # Do not inherit the default profile's bearer token into a secondary.
+        bridge_env.pop(TOKEN_ENV, None)
+        auth = _rhodiz_bridge_auth_headers(self._bridge_script)
+        if auth:
+            bridge_env[TOKEN_ENV] = auth["Authorization"].split(" ", 1)[1]
         return bridge_env
 
     def _bridge_died(self, detail: str, code: str = "whatsapp_bridge_exited") -> bool:
@@ -700,7 +726,25 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                             retryable=True,
                         )
                         return False
-                _kill_port_process(self._bridge_port)
+                from .bridge_integrity import is_rhodiz_wwebjs_bridge
+                if is_rhodiz_wwebjs_bridge(bridge_path.parent):
+                    # First-party WWEBJS is never killed by scanning a TCP
+                    # port: another account/profile or arbitrary Node service
+                    # may be holding it. PID-file ownership cleanup ran above.
+                    try:
+                        holder = bool(_port_listener_pids(self._bridge_port))
+                    except Exception:
+                        holder = True
+                    if holder:
+                        self._set_fatal_error(
+                            "whatsapp_bridge_unverified_port",
+                            f"Port {self._bridge_port} is occupied and RHODIZ cannot verify ownership. "
+                            "No process was stopped; use a distinct bridge_port.",
+                            retryable=False,
+                        )
+                        return False
+                else:
+                    _kill_port_process(self._bridge_port)
             if not secondary or prior_bridge_is_ours:
                 await asyncio.sleep(1)
             # Bridge output goes to a log file so QR codes, errors, and reconnection messages survive for troubleshooting.
@@ -842,7 +886,14 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         if not os.path.exists(file_path):
             return SendResult(success=False, error=f"File not found: {file_path}")
         jid = to_whatsapp_jid(chat_id)
-        payload: dict[str, Any] = {"chatId": jid, "filePath": file_path, "mediaType": media_type}
+        staged_path = file_path
+        from .bridge_integrity import is_rhodiz_wwebjs_bridge
+        if is_rhodiz_wwebjs_bridge(Path(self._bridge_script).parent):
+            try:
+                staged_path = await asyncio.to_thread(stage_outbound_media, file_path, media_type)
+            except (OSError, ValueError) as exc:
+                return SendResult(success=False, error=f"WhatsApp media staging rejected: {type(exc).__name__}")
+        payload: dict[str, Any] = {"chatId": jid, "filePath": staged_path, "mediaType": media_type}
         payload.update({k: v for k, v in (("caption", caption), ("fileName", file_name)) if v})
         result = await self._post_bridge_message("send-media", payload, timeout=120)
         if result.success and result.message_id:
@@ -850,7 +901,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             # knows inbound media only, so index our own sends (the cron-delivered image case).
             from gateway import rich_sent_store
             mime = mimetypes.guess_type(file_path)[0] or _MEDIA_INFO.get(_MEDIA_TYPE_BY_BRIDGE_KIND.get(media_type), ("", ""))[1]
-            await rich_sent_store.record_media_async(jid, result.message_id, [(file_path, mime or "application/octet-stream")])
+            await rich_sent_store.record_media_async(jid, result.message_id, [(staged_path, mime or "application/octet-stream")])
         return result
 
     @_needs_bridge
@@ -906,10 +957,10 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         if await self._bridge_unavailable():
             return
         with suppress(Exception):
-            import aiohttp
-            # ``async with`` — a bare ``await session.post(...)`` leaves the response (and its CLOSE_WAIT socket) alive until GC.
-            async with self._http_session.post(self._bridge_url("typing"), json={"chatId": to_whatsapp_jid(chat_id)}, timeout=aiohttp.ClientTimeout(total=5)):
-                pass
+            # Share the same authenticated HTTP path as messages and receipts.
+            async with self._bridge_req("post", "typing", 5, json={"chatId": to_whatsapp_jid(chat_id)}) as resp:
+                if resp.status != 200:
+                    logger.warning("[%s] WhatsApp typing indicator failed with HTTP %s", self.name, resp.status)
 
     async def get_chat_info(self, chat_id: str) -> dict[str, Any]:
         if not self._running or not self._http_session:
@@ -1141,12 +1192,19 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
                 pending_mentions = []
             return payload
 
+        # The standalone cron sender has no adapter instance. Resolve its
+        # bridge path from the same profile configuration as the gateway.
+        from gateway.platforms.whatsapp_common import resolve_whatsapp_bridge_dir
+        extra = getattr(pconfig, "extra", {}) or {}
+        bridge_script = extra.get("bridge_script") or str(resolve_whatsapp_bridge_dir() / "bridge.js")
+        auth_headers = _rhodiz_bridge_auth_headers(bridge_script)
         last_message_id = None
         async with aiohttp.ClientSession() as session:
             # Whose bridge holds the port is checked before anything is posted: on a shared port another profile's
             # bridge would deliver from that profile's WhatsApp account. A bridge without ``session`` predates the field.
             async with session.get(
                 f"http://localhost:{bridge_port}/health",
+                headers=auth_headers,
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status != 200:
@@ -1154,6 +1212,14 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
                         f"WhatsApp bridge on port {bridge_port} answered /health with HTTP {resp.status}; nothing was sent.")
                 health = await resp.json()
             reported_session = health.get("session")
+            if auth_headers and (
+                not isinstance(reported_session, str) or reported_session != own_session
+            ):
+                # A first-party authenticated bridge must prove WHICH session
+                # it serves; no identity is not evidence of ownership.
+                return send_error(
+                    "WhatsApp authenticated bridge session is missing or does not match "
+                    "this profile; nothing was sent.")
             if reported_session and reported_session != own_session:
                 return send_error(
                     f"WhatsApp bridge on port {bridge_port} serves another profile's session ({reported_session}); "
@@ -1167,7 +1233,7 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
             async def _post(path, payload, total, error_label=None):
                 """``(messageId, None)`` on 200, else ``(None, error_dict)`` (body read only when labelled)."""
                 url = f"http://localhost:{bridge_port}/{path}"
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=total)) as resp:
+                async with session.post(url, json=payload, headers=auth_headers, timeout=aiohttp.ClientTimeout(total=total)) as resp:
                     if resp.status == 200:
                         return (await resp.json()).get("messageId"), None
                     return None, {} if error_label is None else send_error(f"WhatsApp {error_label} error ({resp.status}): {await resp.text()}")
@@ -1189,8 +1255,14 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
                             logger.warning("WhatsApp caption-fallback send failed for missing media")
                     return send_error(f"WhatsApp media file not found: {media_path}")
                 media_type = _bridge_media_type(media_path, is_voice, force_document)
+                original_name = os.path.basename(media_path)
+                if auth_headers:  # first-party authenticated WWEBJS only
+                    try:
+                        media_path = await asyncio.to_thread(stage_outbound_media, media_path, media_type)
+                    except (OSError, ValueError) as exc:
+                        return send_error(f"WhatsApp media staging rejected: {type(exc).__name__}")
                 payload: dict[str, Any] = {"chatId": normalized_chat_id, "filePath": media_path, "mediaType": media_type}
-                payload.update({k: v for k, v in (("fileName", os.path.basename(media_path) if media_type == "document" else None), ("caption", media_caption)) if v})
+                payload.update({k: v for k, v in (("fileName", original_name if media_type == "document" else None), ("caption", media_caption)) if v})
                 payload = _mention_first_payload(payload)
                 mid, err = await _post("send-media", payload, 120, "media")
                 if err:
