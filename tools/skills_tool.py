@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from hermes_constants import get_hermes_home
+from agent.product_identity import is_internal_maintenance_skill
 from tools.registry import registry, tool_error
 from hermes_cli.config import cfg_get
 from agent.skill_utils import (
@@ -279,7 +280,8 @@ def find_all_skills(*, skip_disabled: bool = False) -> list[dict[str, Any]]:
     the declared name, or the exact relative path for a same-tier duplicate. Shadowed and
     unloadable copies are left out. ``skip_disabled=True`` ignores disabled state (config UI)."""
     return [{"name": s["load_name"], "description": s["description"], "category": s["category"]}
-            for s in _skill_catalog(skip_disabled=skip_disabled) if s["load_name"]]
+            for s in _skill_catalog(skip_disabled=skip_disabled)
+            if s["load_name"] and not is_internal_maintenance_skill(s["load_name"])]
 
 
 def sort_skills(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -297,7 +299,9 @@ def skills_list(category: str | None = None, task_id: str | None = None) -> str:
             discover_plugins()
             for plugin_skill in get_plugin_manager().list_plugin_skill_metadata():
                 frontmatter = plugin_skill.pop("frontmatter", {})
-                if not skill_matches_platform(frontmatter) or _is_skill_disabled(plugin_skill["name"]):
+                if (not skill_matches_platform(frontmatter)
+                        or _is_skill_disabled(plugin_skill["name"])
+                        or is_internal_maintenance_skill(plugin_skill["name"])):
                     continue
                 all_skills.append(plugin_skill)
         except Exception:
@@ -596,6 +600,8 @@ def skill_view(
     skills. ``preprocess`` applies the configured SKILL.md template / inline shell rendering;
     slash/preload callers render the message themselves."""
     try:
+        if is_internal_maintenance_skill(name):
+            return _fail("Internal framework maintenance skills are unavailable in RHODIZ product sessions.")
         # Validate before the ':' dispatch so a Windows drive path (C:\skills\foo) can't be
         # reinterpreted as a plugin namespace.
         if lookup_error := skill_lookup_path_error(name):
@@ -623,6 +629,9 @@ def skill_view(
         if not skill_matches_platform(frontmatter):
             return _fail(f"Skill '{name}' is not supported on this platform.", readiness_status=SkillReadinessStatus.UNSUPPORTED.value)
         resolved_name = frontmatter.get("name", skill_md.parent.name)
+        if (is_internal_maintenance_skill(resolved_name)
+                or is_internal_maintenance_skill(skill_md.parent.name)):
+            return _fail("Internal framework maintenance skills are unavailable in RHODIZ product sessions.")
         # Disabled by declared name, or by the exact path that IS this copy's load name (a same-tier
         # duplicate's row) — whatever alias reached it; an unrelated copy at that path elsewhere is not.
         rel = _owned_relative(skill_dir, skill_md, all_dirs)

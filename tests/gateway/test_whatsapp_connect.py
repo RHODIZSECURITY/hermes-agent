@@ -126,8 +126,68 @@ class TestDataInitialized:
         ):
             result = await adapter._wait_for_bridge()
 
-        # The bridge HTTP server is up, so timeout uses the warn-and-proceed path.
+        # The bridge HTTP server is up but WhatsApp never connects: this
+        # used to take the warn-and-proceed path and return True (issue
+        # #803, a false connected state). It is now a named, retryable
+        # failure. The NameError regression stays covered: the call above
+        # completes without raising.
+        assert result is False
+        assert adapter.fatal_error_code == "whatsapp_not_connected"
+        assert adapter.fatal_error_retryable is True
+
+
+# ---------------------------------------------------------------------------
+# Verified session status (issue #803): HTTP up is not "connected"
+# ---------------------------------------------------------------------------
+
+
+class TestVerifiedSessionStatus:
+    """_wait_for_bridge returns True only on a verified connected status."""
+
+    @pytest.mark.asyncio
+    async def test_phase2_connects_within_budget(self):
+        """Phase 1 sees 'connecting'; Phase 2 reaches 'connected' -> True."""
+        adapter = _make_adapter()
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # bridge stays alive
+        adapter._bridge_process = mock_proc
+
+        probe = AsyncMock(side_effect=[(True, {"status": "connecting"})] * 15
+                        + [(True, {"status": "connected"})])
+        with patch.object(adapter, "_probe_bridge_health", probe), patch(
+            "plugins.platforms.whatsapp.adapter.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await adapter._wait_for_bridge()
+
         assert result is True
+        assert adapter.fatal_error_code is None
+
+    @pytest.mark.asyncio
+    async def test_phase2_exhausted_is_named_not_connected_failure(self):
+        """HTTP stays up, status stays 'disconnected' -> False, named error."""
+        adapter = _make_adapter()
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # bridge stays alive
+        adapter._bridge_process = mock_proc
+
+        with patch.object(
+            adapter,
+            "_probe_bridge_health",
+            new_callable=AsyncMock,
+            return_value=(True, {"status": "disconnected"}),
+        ), patch(
+            "plugins.platforms.whatsapp.adapter.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await adapter._wait_for_bridge()
+
+        assert result is False
+        assert adapter.fatal_error_code == "whatsapp_not_connected"
+        assert adapter.fatal_error_retryable is True
+        assert "disconnected" in adapter.fatal_error_message
 
 
 # ---------------------------------------------------------------------------
