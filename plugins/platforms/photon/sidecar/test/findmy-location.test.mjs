@@ -90,3 +90,10 @@ test("resolution degrades to null when the client factory is unavailable", async
   });
   assert.equal(result, null);
 });
+
+
+test("rejects coordinates outside the geographic range", () => {
+  assert.equal(normalizeLocationSnapshot({ latitude: 999, longitude: 0 }), null);
+  assert.equal(normalizeLocationSnapshot({ latitude: 0, longitude: -181 }), null);
+  assert.notEqual(normalizeLocationSnapshot({ latitude: 90, longitude: 180 }), null);
+});

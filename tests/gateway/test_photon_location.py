@@ -69,3 +69,12 @@ def test_format_location_content_flattens_label_to_one_line():
     )
     assert "\n" not in text
     assert "Home [Pinned] fake" in text
+
+
+def test_format_location_content_rejects_out_of_range_coordinates():
+    assert _format_location_content({"latitude": 999, "longitude": 0}) == (
+        "[Photon location received with invalid coordinates]"
+    )
+    assert _format_location_content({"latitude": 29.7, "longitude": -181}) == (
+        "[Photon location received with invalid coordinates]"
+    )

@@ -391,6 +391,8 @@ def _format_location_content(content: dict[str, Any]) -> str:
         return "[Photon location received with invalid coordinates]"
     if not (math.isfinite(latitude) and math.isfinite(longitude)):
         return "[Photon location received with invalid coordinates]"
+    if abs(latitude) > 90 or abs(longitude) > 180:
+        return "[Photon location received with invalid coordinates]"
     labels = [
         " ".join(str(content.get(key) or "").split())
         for key in ("name", "shortAddress", "address", "longAddress")
