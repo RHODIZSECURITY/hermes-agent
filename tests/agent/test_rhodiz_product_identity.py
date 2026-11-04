@@ -134,7 +134,7 @@ def _soul_home(tmp_path):
     return home
 
 
-def _run_identity_probe(home, bind_policy: bool) -> dict:
+def _run_identity_probe(home, bind_mode: str) -> dict:
     script = textwrap.dedent(
         """
         import json, pathlib, sys
@@ -145,10 +145,12 @@ def _run_identity_probe(home, bind_policy: bool) -> dict:
             reads.append(self.name)
             return real_read_text(self, *args, **kwargs)
         pathlib.Path.read_text = recording_read_text
-        if sys.argv[2] == "bind":
+        if sys.argv[2] in ("bind", "bind-ignore"):
             from agent.safe_worker_policy import _bind_safe_worker_policy
             _bind_safe_worker_policy(
-                safe_mode=True, ignore_user_config=True, config={}
+                safe_mode=sys.argv[2] == "bind",
+                ignore_user_config=True,
+                config={},
             )
         from agent.product_identity import is_rhodiz_product_mode
         result = is_rhodiz_product_mode(home)
@@ -158,7 +160,7 @@ def _run_identity_probe(home, bind_policy: bool) -> dict:
     env = dict(os.environ)
     env.pop("RHODIZ_PRODUCT_MODE", None)
     completed = subprocess.run(
-        [sys.executable, "-c", script, str(home), "bind" if bind_policy else "plain"],
+        [sys.executable, "-c", script, str(home), bind_mode],
         capture_output=True,
         text=True,
         env=env,
@@ -170,12 +172,18 @@ def _run_identity_probe(home, bind_policy: bool) -> dict:
 
 
 def test_product_mode_soul_fallback_reads_soul_without_policy(tmp_path):
-    probe = _run_identity_probe(_soul_home(tmp_path), bind_policy=False)
+    probe = _run_identity_probe(_soul_home(tmp_path), "plain")
     assert probe["result"] is True
     assert "SOUL.md" in probe["reads"]
 
 
 def test_product_mode_never_reads_soul_under_bypass_worker_policy(tmp_path):
-    probe = _run_identity_probe(_soul_home(tmp_path), bind_policy=True)
+    probe = _run_identity_probe(_soul_home(tmp_path), "bind")
+    assert probe["result"] is False
+    assert "SOUL.md" not in probe["reads"]
+
+
+def test_product_mode_never_reads_soul_under_ignore_user_config_only(tmp_path):
+    probe = _run_identity_probe(_soul_home(tmp_path), "bind-ignore")
     assert probe["result"] is False
     assert "SOUL.md" not in probe["reads"]
