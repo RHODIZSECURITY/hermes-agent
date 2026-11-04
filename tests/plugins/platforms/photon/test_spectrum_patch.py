@@ -295,3 +295,40 @@ def test_spectrum_patch_rewrites_the_imessage_mapper(tmp_path: Path) -> None:
     assert chunk.read_text(encoding="utf-8") == patched
 
 
+def test_sidecar_boots_degraded_without_advanced_imessage(tmp_path: Path) -> None:
+    """Find My is optional: without @photon-ai/advanced-imessage the sidecar
+    must still boot and serve health, logging the degraded feature."""
+    sidecar = _write_sidecar_fixture(tmp_path, sdk_available=True)
+    shutil.rmtree(sidecar / "node_modules" / "@photon-ai")
+    port = _free_port()
+    proc = subprocess.Popen(
+        ["node", "index.mjs"],
+        cwd=sidecar,
+        env=_sidecar_env(port),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/healthz",
+        data=b"{}",
+        headers={"X-Hermes-Sidecar-Token": "test-token"},
+        method="POST",
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                with urllib.request.urlopen(request, timeout=0.5) as response:
+                    payload = json.load(response)
+                break
+            except OSError:
+                if proc.poll() is not None or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+        assert payload["ok"] is True
+        assert proc.poll() is None
+    finally:
+        proc.terminate()
+        _, stderr = proc.communicate(timeout=5)
+    assert "Find My location support unavailable" in stderr

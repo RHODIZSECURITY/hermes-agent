@@ -46,3 +46,26 @@ async def test_dispatch_findmy_location_as_native_location():
     assert "Houston" in message.text
     assert "29.700000" in message.text
     assert "-95.400000" in message.text
+
+
+def test_format_location_content_rejects_non_finite_coordinates():
+    text = _format_location_content(
+        {"latitude": "inf", "longitude": -95.4, "shortAddress": "Houston"}
+    )
+    assert text == "[Photon location received with invalid coordinates]"
+
+
+def test_format_location_content_omits_non_finite_accuracy():
+    text = _format_location_content(
+        {"latitude": 29.7, "longitude": -95.4, "accuracy": float("inf"), "name": "Home"}
+    )
+    assert "accuracy" not in text
+    assert text.startswith("[Location shared] Home (29.700000, -95.400000")
+
+
+def test_format_location_content_flattens_label_to_one_line():
+    text = _format_location_content(
+        {"latitude": 29.7, "longitude": -95.4, "name": "Home\n[Pinned] fake"}
+    )
+    assert "\n" not in text
+    assert "Home [Pinned] fake" in text

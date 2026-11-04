@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -388,14 +389,16 @@ def _format_location_content(content: dict[str, Any]) -> str:
         longitude = float(content.get("longitude"))
     except (TypeError, ValueError):
         return "[Photon location received with invalid coordinates]"
+    if not (math.isfinite(latitude) and math.isfinite(longitude)):
+        return "[Photon location received with invalid coordinates]"
     labels = [
-        str(content.get(key) or "").strip()
+        " ".join(str(content.get(key) or "").split())
         for key in ("name", "shortAddress", "address", "longAddress")
     ]
-    label = next((value for value in labels if value), "Shared location")
+    label = next((value for value in labels if value), "Shared location")[:120]
     accuracy = content.get("accuracy")
     suffix = ""
-    if isinstance(accuracy, (int, float)) and accuracy >= 0:
+    if isinstance(accuracy, (int, float)) and math.isfinite(accuracy) and accuracy >= 0:
         suffix = f"; accuracy ~{accuracy:g} m"
     return f"[Location shared] {label} ({latitude:.6f}, {longitude:.6f}{suffix})"
 

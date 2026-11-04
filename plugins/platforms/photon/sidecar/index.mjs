@@ -67,7 +67,7 @@ import crypto from "node:crypto";
 import { once } from "node:events";
 import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
 import { chooseSendFormat } from "./send-format.mjs";
-import { resolveFindMyLocation } from "./findmy-location.mjs";
+import { describeFindMyError, resolveFindMyLocation } from "./findmy-location.mjs";
 import {
   classifyProbeRejection,
   createProbeMessageId,
@@ -324,7 +324,6 @@ try {
     cloud: spectrumCloud,
   } = await import("spectrum-ts"));
   ({ imessage, effect: imessageEffect } = await import("spectrum-ts/providers/imessage"));
-  ({ createGrpcClient: createAdvancedIMessageGrpcClient } = await import("@photon-ai/advanced-imessage/grpc"));
 } catch (e) {
   console.error(
     "photon-sidecar: spectrum-ts is not installed. Run `npm install` " +
@@ -332,6 +331,19 @@ try {
       (e && e.stack ? e.stack : String(e))
   );
   process.exit(3);
+}
+
+// Find My resolution is optional: a missing advanced-imessage install must
+// degrade that one feature, never take the whole sidecar down with it.
+try {
+  ({ createGrpcClient: createAdvancedIMessageGrpcClient } = await import("@photon-ai/advanced-imessage/grpc"));
+} catch {
+  console.error(
+    "photon-sidecar: @photon-ai/advanced-imessage is not installed; " +
+      "Find My location support unavailable. Run `npm install` inside " +
+      "plugins/platforms/photon/sidecar/ to enable it."
+  );
+  createAdvancedIMessageGrpcClient = undefined;
 }
 
 const app = await Spectrum({
@@ -522,6 +534,7 @@ function reactionTargetText(target) {
 }
 
 async function normalizeFindMyContent(message) {
+  if (!spectrumCloud || !createAdvancedIMessageGrpcClient) return null;
   try {
     return await resolveFindMyLocation({
       message,
@@ -533,7 +546,7 @@ async function normalizeFindMyContent(message) {
   } catch (e) {
     console.error(
       "photon-sidecar: failed to resolve Find My location: " +
-        (e?.message || String(e))
+        describeFindMyError(e)
     );
     return null;
   }

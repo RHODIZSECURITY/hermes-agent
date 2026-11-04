@@ -53,6 +53,7 @@ export async function resolveFindMyLocation({
   if (!isFindMyLocationMessage(message)) return null;
   const sender = message?.sender?.address || message?.sender?.id || "";
   if (!sender || !projectId || !projectSecret) return null;
+  if (typeof issueTokens !== "function" || typeof createClient !== "function") return null;
   const tokenData = await issueTokens(projectId, projectSecret);
   const route = chooseRoute(tokenData, message?.space?.phone);
   if (!route) return null;
@@ -66,6 +67,22 @@ export async function resolveFindMyLocation({
   try {
     return normalizeLocationSnapshot(await client.locations.get(sender));
   } finally {
-    await client.close();
+    // A failing close must not mask the resolution result or its error.
+    try {
+      await client.close();
+    } catch {
+      // The one-shot client is discarded either way.
+    }
   }
+}
+
+
+export function describeFindMyError(error) {
+  // Error messages from the gRPC stack can embed endpoints or credential
+  // fragments; log only the stable code/name, never the raw message.
+  const code = error?.code;
+  if (code !== undefined && code !== null && code !== "") return String(code);
+  const name = error?.name;
+  if (typeof name === "string" && name) return name;
+  return "unknown error";
 }
