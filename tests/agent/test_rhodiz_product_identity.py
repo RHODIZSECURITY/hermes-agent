@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -118,3 +123,59 @@ def test_internal_maintenance_skill_gate_is_product_scoped(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert is_internal_maintenance_skill("hermes-agent", home=plain) is False
+
+
+def _soul_home(tmp_path):
+    home = tmp_path / "soul-home"
+    home.mkdir()
+    (home / "SOUL.md").write_text(
+        "You are RHODIZ IA, a local-first assistant.\n", encoding="utf-8"
+    )
+    return home
+
+
+def _run_identity_probe(home, bind_policy: bool) -> dict:
+    script = textwrap.dedent(
+        """
+        import json, pathlib, sys
+        home = pathlib.Path(sys.argv[1])
+        reads = []
+        real_read_text = pathlib.Path.read_text
+        def recording_read_text(self, *args, **kwargs):
+            reads.append(self.name)
+            return real_read_text(self, *args, **kwargs)
+        pathlib.Path.read_text = recording_read_text
+        if sys.argv[2] == "bind":
+            from agent.safe_worker_policy import _bind_safe_worker_policy
+            _bind_safe_worker_policy(
+                safe_mode=True, ignore_user_config=True, config={}
+            )
+        from agent.product_identity import is_rhodiz_product_mode
+        result = is_rhodiz_product_mode(home)
+        print(json.dumps({"result": result, "reads": reads}))
+        """
+    )
+    env = dict(os.environ)
+    env.pop("RHODIZ_PRODUCT_MODE", None)
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(home), "bind" if bind_policy else "plain"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def test_product_mode_soul_fallback_reads_soul_without_policy(tmp_path):
+    probe = _run_identity_probe(_soul_home(tmp_path), bind_policy=False)
+    assert probe["result"] is True
+    assert "SOUL.md" in probe["reads"]
+
+
+def test_product_mode_never_reads_soul_under_bypass_worker_policy(tmp_path):
+    probe = _run_identity_probe(_soul_home(tmp_path), bind_policy=True)
+    assert probe["result"] is False
+    assert "SOUL.md" not in probe["reads"]

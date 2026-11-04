@@ -74,6 +74,11 @@ def safe_worker_enabled() -> bool:
     return policy is not None and policy.safe_mode
 
 
+def worker_ignores_user_config() -> bool:
+    policy = _current_policy()
+    return policy is not None and policy.ignore_user_config
+
+
 def worker_config_snapshot() -> dict | None:
     """Return detached explicit config; None means the ordinary loader owns it."""
     policy = _current_policy()

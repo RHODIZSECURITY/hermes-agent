@@ -31,6 +31,20 @@ def _is_supported_technical_skill(name: str) -> bool:
 
 
 
+def _bypass_worker_bound() -> bool:
+    """Whether a safe-mode / ignore-user-config worker policy is bound
+    in this process. Such a worker runs on the frozen config snapshot
+    bound at bootstrap and must not read profile files at all."""
+    try:
+        from agent.safe_worker_policy import (
+            safe_worker_enabled,
+            worker_ignores_user_config,
+        )
+        return safe_worker_enabled() or worker_ignores_user_config()
+    except Exception:
+        return False
+
+
 def is_rhodiz_product_mode(home: str | Path | None = None) -> bool:
     """Return whether this process/profile is the RHODIZ IA product surface.
 
@@ -49,6 +63,12 @@ def is_rhodiz_product_mode(home: str | Path | None = None) -> bool:
     )
     if (root / ".rhodiz-product").is_file():
         return True
+    if _bypass_worker_bound():
+        # The SOUL.md compatibility fallback is user config by
+        # definition; a bypass worker never reads it (its product
+        # mode, when any, is declared by the launcher via the
+        # environment branch above).
+        return False
     try:
         soul = (root / "SOUL.md").read_text(encoding="utf-8")[:8192]
     except OSError:
