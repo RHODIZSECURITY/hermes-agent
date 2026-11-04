@@ -397,7 +397,9 @@ def _format_location_content(content: dict[str, Any]) -> str:
         " ".join(str(content.get(key) or "").split())
         for key in ("name", "shortAddress", "address", "longAddress")
     ]
-    label = next((value for value in labels if value), "Shared location")[:120]
+    label = next((value for value in labels if value), "Shared location")
+    if len(label) > 120:
+        label = label[:119] + "…"
     accuracy = content.get("accuracy")
     suffix = ""
     if isinstance(accuracy, (int, float)) and math.isfinite(accuracy) and accuracy >= 0:

@@ -78,3 +78,10 @@ def test_format_location_content_rejects_out_of_range_coordinates():
     assert _format_location_content({"latitude": 29.7, "longitude": -181}) == (
         "[Photon location received with invalid coordinates]"
     )
+
+
+def test_format_location_content_marks_truncated_label():
+    text = _format_location_content(
+        {"latitude": 29.7, "longitude": -95.4, "name": "A" * 200}
+    )
+    assert text.startswith("[Location shared] " + "A" * 119 + "… (")
