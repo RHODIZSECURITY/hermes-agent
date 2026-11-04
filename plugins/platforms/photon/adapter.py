@@ -381,6 +381,25 @@ def _format_richlink_content(content: dict[str, Any]) -> str:
     return "\n".join(parts) if parts else "[Photon rich link received with no URL]"
 
 
+def _format_location_content(content: dict[str, Any]) -> str:
+    """Render a Photon/Find My location as explicit model-readable context."""
+    try:
+        latitude = float(content.get("latitude"))
+        longitude = float(content.get("longitude"))
+    except (TypeError, ValueError):
+        return "[Photon location received with invalid coordinates]"
+    labels = [
+        str(content.get(key) or "").strip()
+        for key in ("name", "shortAddress", "address", "longAddress")
+    ]
+    label = next((value for value in labels if value), "Shared location")
+    accuracy = content.get("accuracy")
+    suffix = ""
+    if isinstance(accuracy, (int, float)) and accuracy >= 0:
+        suffix = f"; accuracy ~{accuracy:g} m"
+    return f"[Location shared] {label} ({latitude:.6f}, {longitude:.6f}{suffix})"
+
+
 def _group_item_contents(content: dict[str, Any]) -> list[dict[str, Any]]:
     """The dict ``content`` of every well-formed item in a ``group`` payload."""
     items = (item.get("content") if isinstance(item, dict) else None for item in content.get("items") or [])
@@ -471,6 +490,8 @@ def _normalize_group_content(content: dict[str, Any]) -> _Normalized:
             text_parts.append(item_content.get("text") or "")
         elif item_type == "richlink":
             text_parts.append(_format_richlink_content(item_content))
+        elif item_type == "location":
+            text_parts.append(_format_location_content(item_content))
         elif item_type:
             text_parts.append(f"[Photon content type not handled: {item_type}]")
     if media_urls and mtype == MessageType.TEXT:
@@ -483,6 +504,7 @@ _CONTENT_NORMALIZERS: dict[Any, Callable[[dict[str, Any]], _Normalized]] = {
     "text": lambda c: (c.get("text") or "", MessageType.TEXT, [], []),
     "attachment": _normalize_binary_payload, "voice": _normalize_binary_payload,
     "richlink": lambda c: (_format_richlink_content(c), MessageType.TEXT, [], []),
+    "location": lambda c: (_format_location_content(c), MessageType.LOCATION, [], []),
     "group": _normalize_group_content,
 }
 _BINARY_CONTENT_TYPES = {"attachment", "voice", "group"}  # may decode/cache media bytes → run off the event loop
@@ -496,6 +518,8 @@ def _mention_gate_text(content: dict[str, Any]) -> str:
         return content.get("text") or ""
     if ctype == "richlink":
         return _format_richlink_content(content)
+    if ctype == "location":
+        return _format_location_content(content)
     if ctype == "group":
         return "\n".join(part for part in map(_mention_gate_text, _group_item_contents(content)) if part)
     return ""
@@ -1296,7 +1320,11 @@ class PhotonAdapter(BasePlatformAdapter):
     async def send_voice(self, chat_id: str, audio_path: str, caption: Optional[str] = None,
                          reply_to: Optional[str] = None, metadata: Optional[dict[str, Any]] = None,
                          **kwargs) -> SendResult:
-        return await self._sidecar_send_attachment(chat_id, audio_path, caption=caption, kind="voice")
+        # The iMessage provider normalizes voice payload bytes to M4A/AAC
+        # before upload. Keep the source MIME for transcoding, but name the
+        # uploaded artifact .m4a; M4A bytes under .ogg render as 00:00 on iOS.
+        return await self._sidecar_send_attachment(
+            chat_id, audio_path, name="voice.m4a", caption=caption, kind="voice")
 
     async def send_video(self, chat_id: str, video_path: str, caption: Optional[str] = None,
                          reply_to: Optional[str] = None, metadata: Optional[dict[str, Any]] = None,
@@ -1680,7 +1708,8 @@ async def _standalone_send(
                     logger.warning("[photon] standalone send skipping unsafe path")
                     continue
                 att_body = _attachment_body(
-                    chat_id, safe_path, kind="voice" if is_voice else "attachment", mime_type=_guess_mime(safe_path))
+                    chat_id, safe_path, kind="voice" if is_voice else "attachment",
+                    name="voice.m4a" if is_voice else None, mime_type=_guess_mime(safe_path))
                 resp, data = await _post("/send-attachment", att_body)
                 if not data:
                     return _standalone_error(resp)

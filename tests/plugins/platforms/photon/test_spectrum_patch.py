@@ -87,6 +87,26 @@ def _write_sidecar_fixture(tmp_path: Path, *, sdk_available: bool) -> Path:
         "export function imessage() { return {}; }\nimessage.config = () => ({});\n",
         encoding="utf-8",
     )
+
+    # index.mjs also imports the advanced iMessage gRPC helper. The health
+    # fixture does not exercise Find My resolution, but the ESM import must
+    # resolve so the sidecar can finish booting.
+    advanced = sidecar / "node_modules" / "@photon-ai" / "advanced-imessage"
+    advanced.mkdir(parents=True)
+    (advanced / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@photon-ai/advanced-imessage",
+                "type": "module",
+                "exports": {"./grpc": "./grpc.js"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (advanced / "grpc.js").write_text(
+        "export function createGrpcClient() { return {}; }\n",
+        encoding="utf-8",
+    )
     return sidecar
 
 
